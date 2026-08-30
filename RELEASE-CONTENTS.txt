@@ -1,0 +1,4 @@
+Finance Tracker v2.2.3 release contents
+FinanceTracker-v2.2.3-TEST_REPORT.md
+INSTALLATION-v2.2.3.md
+UPDATE-v2.2.3.md

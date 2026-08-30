@@ -1,0 +1,58 @@
+#!/bin/zsh
+set -euo pipefail
+APP_DIR="/Applications/finance_tracker"
+CONSOLE_USER=$(stat -f '%Su' /dev/console 2>/dev/null || true)
+if [[ -n "$CONSOLE_USER" && "$CONSOLE_USER" != "root" ]]; then
+  USER_HOME=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+  UID_NUM=$(id -u "$CONSOLE_USER" 2>/dev/null || true)
+fi
+[[ -n "${USER_HOME:-}" ]] || USER_HOME="/Users/Shared"
+SUPPORT_DIR="$USER_HOME/Library/Application Support/Adams-Home/Finance Tracker"
+BACKUP_DIR="$SUPPORT_DIR/Backups"
+mkdir -p "$BACKUP_DIR"
+
+# Stop every Finance Tracker LaunchAgent name used by earlier releases before touching code.
+if [[ -n "${UID_NUM:-}" ]]; then
+  for LABEL in com.adams.financetracker com.finance.tracker; do
+    launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
+  done
+  for PLIST in "$USER_HOME/Library/LaunchAgents/com.adams.financetracker.plist" "$USER_HOME/Library/LaunchAgents/com.finance.tracker.plist"; do
+    [[ -f "$PLIST" ]] && launchctl bootout "gui/$UID_NUM" "$PLIST" 2>/dev/null || true
+  done
+fi
+
+# Stale Finance Tracker processes are stopped by LaunchAgent identity only.
+# Stop only stale Finance Tracker processes whose command line points at this installation.
+# Do not kill unrelated software merely because it uses the same TCP port.
+for PID in $(pgrep -f '/Applications/finance_tracker/.*(waitress|service-run\.sh|app\.py)' 2>/dev/null || true); do
+  CMD=$(ps -p "$PID" -o command= 2>/dev/null || true)
+  if [[ "$CMD" == *"/Applications/finance_tracker/"* ]]; then
+    kill "$PID" 2>/dev/null || true
+  fi
+done
+sleep 1
+for PID in $(pgrep -f '/Applications/finance_tracker/.*(waitress|service-run\.sh|app\.py)' 2>/dev/null || true); do
+  CMD=$(ps -p "$PID" -o command= 2>/dev/null || true)
+  if [[ "$CMD" == *"/Applications/finance_tracker/"* ]]; then
+    kill -9 "$PID" 2>/dev/null || true
+  fi
+done
+
+if [[ -d "$APP_DIR" ]]; then
+  # Authentication preference is stored in data/finance.db. The data directory is
+  # deliberately preserved during every upgrade, so auth_required survives reinstalls.
+  if [[ -f "$APP_DIR/data/finance.db" ]]; then
+    TS=$(date '+%Y%m%d-%H%M%S')
+    cp -p "$APP_DIR/data/finance.db" "$BACKUP_DIR/finance-preupgrade-$TS.db"
+  else
+    mkdir -p "$SUPPORT_DIR"
+    echo "$(date): Existing Finance Tracker application detected, but data/finance.db was not found. No database was created or overwritten by preinstall." >> "$SUPPORT_DIR/install-warnings.log"
+  fi
+
+  # Remove previous release code while preserving user data and the reusable virtual environment.
+  find "$APP_DIR" -mindepth 1 -maxdepth 1 \
+    ! -name data \
+    ! -name .venv \
+    -exec rm -rf {} +
+fi
+exit 0

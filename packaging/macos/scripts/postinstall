@@ -1,0 +1,75 @@
+#!/bin/zsh
+set -euo pipefail
+APP_DIR="/Applications/finance_tracker"
+EXPECTED_VERSION="2.4.6"
+mkdir -p "$APP_DIR/data" "$APP_DIR/data/receipts"
+chmod +x "$APP_DIR"/*.sh 2>/dev/null || true
+
+if [[ ! -f "$APP_DIR/VERSION" ]] || [[ "$(cat "$APP_DIR/VERSION")" != "$EXPECTED_VERSION" ]]; then
+  echo "Finance Tracker installation verification failed: expected VERSION $EXPECTED_VERSION" >&2
+  exit 1
+fi
+
+# Existing security settings are preserved. New installs use the first-run wizard.
+
+PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+for CANDIDATE in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+  if [[ -z "$PYTHON_BIN" && -x "$CANDIDATE" ]]; then PYTHON_BIN="$CANDIDATE"; fi
+done
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "Finance Tracker requires Python 3, but no supported python3 installation was found." >&2
+  exit 1
+fi
+if [[ ! -d "$APP_DIR/wheelhouse" ]] || [[ -z "$(find "$APP_DIR/wheelhouse" -type f 2>/dev/null | head -1)" ]]; then
+  echo "Finance Tracker offline dependency wheelhouse is missing from the package." >&2
+  exit 1
+fi
+[[ -d "$APP_DIR/.venv" ]] || "$PYTHON_BIN" -m venv "$APP_DIR/.venv"
+"$APP_DIR/.venv/bin/python" -m pip install -q --no-index --find-links "$APP_DIR/wheelhouse" -r "$APP_DIR/requirements.txt"
+
+
+CONSOLE_USER=$(stat -f '%Su' /dev/console 2>/dev/null || true)
+if [[ -n "$CONSOLE_USER" && "$CONSOLE_USER" != "root" ]]; then
+  USER_HOME=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+  LOG_DIR="$USER_HOME/Library/Logs/FinanceTracker"
+  PLIST_DIR="$USER_HOME/Library/LaunchAgents"
+  LABEL="com.adams.financetracker"
+  UID_NUM=$(id -u "$CONSOLE_USER")
+  PLIST="$PLIST_DIR/$LABEL.plist"
+  LEGACY_PLIST="$PLIST_DIR/com.finance.tracker.plist"
+  mkdir -p "$LOG_DIR" "$PLIST_DIR"
+  rm -f "$LEGACY_PLIST" 2>/dev/null || true
+  cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>$LABEL</string>
+<key>ProgramArguments</key><array><string>$APP_DIR/service-run.sh</string></array>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>StandardOutPath</key><string>$LOG_DIR/stdout.log</string>
+<key>StandardErrorPath</key><string>$LOG_DIR/stderr.log</string>
+</dict></plist>
+PLIST
+  chown "$CONSOLE_USER":staff "$PLIST" 2>/dev/null || true
+  launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
+  launchctl asuser "$UID_NUM" launchctl bootstrap "gui/$UID_NUM" "$PLIST"
+  launchctl asuser "$UID_NUM" launchctl kickstart -k "gui/$UID_NUM/$LABEL"
+
+  # Verify the LaunchAgent and local HTTP endpoint before Installer reports success.
+  HEALTHY=0
+  for N in 1 2 3 4 5 6 7 8 9 10; do
+    if launchctl print "gui/$UID_NUM/$LABEL" >/dev/null 2>&1; then
+      if /usr/bin/curl --silent --fail --max-time 2 "http://127.0.0.1:8080/" >/dev/null 2>&1; then
+        HEALTHY=1
+        break
+      fi
+    fi
+    sleep 1
+  done
+  if [[ "$HEALTHY" -ne 1 ]]; then
+    echo "Finance Tracker installation failed health verification. Check $LOG_DIR/stderr.log" >&2
+    exit 1
+  fi
+  echo "$(date): Finance Tracker $EXPECTED_VERSION installed and health check passed." >> "$LOG_DIR/installer.log"
+fi
+exit 0

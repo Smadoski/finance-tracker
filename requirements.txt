@@ -1,0 +1,5 @@
+Flask>=3.0,<4
+reportlab>=4.0,<5
+waitress>=3.0,<4
+pyobjc-framework-Vision>=10.3; sys_platform == 'darwin'
+certifi>=2024.7.4
