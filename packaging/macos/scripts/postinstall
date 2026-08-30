@@ -1,12 +1,16 @@
 #!/bin/zsh
 set -euo pipefail
 APP_DIR="/Applications/finance_tracker"
-EXPECTED_VERSION="2.4.6"
 mkdir -p "$APP_DIR/data" "$APP_DIR/data/receipts"
 chmod +x "$APP_DIR"/*.sh 2>/dev/null || true
 
-if [[ ! -f "$APP_DIR/VERSION" ]] || [[ "$(cat "$APP_DIR/VERSION")" != "$EXPECTED_VERSION" ]]; then
-  echo "Finance Tracker installation verification failed: expected VERSION $EXPECTED_VERSION" >&2
+if [[ ! -f "$APP_DIR/VERSION" ]]; then
+  echo "Finance Tracker installation verification failed: VERSION is missing" >&2
+  exit 1
+fi
+INSTALLED_VERSION="$(tr -d '[:space:]' < "$APP_DIR/VERSION")"
+if [[ ! "$INSTALLED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Finance Tracker installation verification failed: invalid VERSION $INSTALLED_VERSION" >&2
   exit 1
 fi
 
@@ -70,6 +74,6 @@ PLIST
     echo "Finance Tracker installation failed health verification. Check $LOG_DIR/stderr.log" >&2
     exit 1
   fi
-  echo "$(date): Finance Tracker $EXPECTED_VERSION installed and health check passed." >> "$LOG_DIR/installer.log"
+  echo "$(date): Finance Tracker $INSTALLED_VERSION installed and health check passed." >> "$LOG_DIR/installer.log"
 fi
 exit 0

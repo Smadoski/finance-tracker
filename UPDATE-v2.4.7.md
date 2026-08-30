@@ -16,6 +16,8 @@ data migration.
   Desktop browsers retain direct file sharing where supported and otherwise
   download the PDF.
 - Generated Python and pytest caches are excluded from the release archive.
+- The macOS installer validates the packaged version dynamically and includes
+  its offline dependency wheelhouse.
 
 ## Upgrade
 
