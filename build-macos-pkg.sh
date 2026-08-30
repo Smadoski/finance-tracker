@@ -24,7 +24,11 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 PAYLOAD="$WORK/payload"
 mkdir -p "$PAYLOAD/Applications/finance_tracker"
-rsync -a --exclude data --exclude .venv --exclude packaging --exclude 'FinanceTracker-*.pkg' --exclude 'FinanceTracker-*.zip' "$ROOT/" "$PAYLOAD/Applications/finance_tracker/"
+rsync -a \
+  --exclude .git --exclude .venv --exclude .pytest_cache --exclude '__pycache__' \
+  --exclude '*.pyc' --exclude data --exclude wheelhouse --exclude packaging \
+  --exclude 'FinanceTracker-*.pkg' --exclude 'FinanceTracker-*.zip' \
+  "$ROOT/" "$PAYLOAD/Applications/finance_tracker/"
 chmod +x "$PAYLOAD/Applications/finance_tracker"/*.sh 2>/dev/null || true
 pkgbuild --root "$PAYLOAD" --scripts "$ROOT/packaging/macos/scripts" --identifier com.adams.financetracker --version "$VERSION" --install-location / "$WORK/FinanceTracker-component.pkg"
 productbuild --package "$WORK/FinanceTracker-component.pkg" "$ROOT/FinanceTracker-v${VERSION}-macOS.pkg"

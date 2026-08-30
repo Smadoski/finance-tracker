@@ -1,4 +1,16 @@
-Finance Tracker v2.2.3 release contents
-FinanceTracker-v2.2.3-TEST_REPORT.md
-INSTALLATION-v2.2.3.md
-UPDATE-v2.2.3.md
+Finance Tracker v2.4.7 release contents
+
+- Application source, templates and static assets
+- Python runtime and development requirements
+- Automated regression tests
+- macOS service and installer tooling
+- Windows start helper
+- v2.4.7 update notes and deep test report
+
+Excluded from the release:
+
+- Financial databases, receipts and secrets (`data/`)
+- Python virtual environments
+- Git metadata
+- Python bytecode and pytest caches
+- Previously generated ZIP and PKG artifacts

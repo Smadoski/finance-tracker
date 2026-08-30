@@ -770,13 +770,19 @@ def edit_account(account_id):
         name=request.form['name'].strip()
         account_type=request.form['account_type']
         currency=request.form['currency']
+        if currency not in ('GBP','EUR'):
+            conn.close(); flash('Choose a valid currency for the account.','error'); return redirect(url_for('edit_account',account_id=account_id))
         try:
             opening_balance=float(request.form.get('opening_balance') or 0)
         except ValueError:
             opening_balance=float(a['opening_balance']); flash('Opening balance was not changed because the value was invalid.','error')
-        conn.execute('''UPDATE accounts SET name=?,account_type=?,currency=?,opening_balance=?,institution=?,notes=?,active=? WHERE id=?''',(
-            name,account_type,currency,opening_balance,request.form.get('institution','').strip(),request.form.get('notes','').strip(),1 if request.form.get('active')=='1' else 0,account_id))
-        conn.commit(); conn.close(); flash('Account updated.','ok'); return redirect(url_for('account_detail',account_id=account_id))
+        try:
+            conn.execute('''UPDATE accounts SET name=?,account_type=?,currency=?,opening_balance=?,institution=?,notes=?,active=? WHERE id=?''',(
+                name,account_type,currency,opening_balance,request.form.get('institution','').strip(),request.form.get('notes','').strip(),1 if request.form.get('active')=='1' else 0,account_id))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.rollback(); conn.close(); flash('The account details were not valid. No changes were saved.','error'); return redirect(url_for('edit_account',account_id=account_id))
+        conn.close(); flash('Account updated.','ok'); return redirect(url_for('account_detail',account_id=account_id))
     conn.close(); return render_template('account_edit.html',a=a)
 
 
@@ -1113,7 +1119,7 @@ def category_report_pdf():
     buf=io.BytesIO(); doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=10*mm,leftMargin=10*mm,topMargin=15*mm,bottomMargin=15*mm); styles=getSampleStyleSheet()
     story=[Paragraph(get_setting('household_name','Household Finance'),styles['Title']),Paragraph('Category & Subcategory Report',styles['Heading2']),Paragraph(f'Period: {start} to {end} | {account_selection} | {selection} | Type: {kind.title() if kind else "All"} | GBP/EUR rate: {fx:.4f}',styles['Normal']),Spacer(1,6*mm)]
     table=Table(data,colWidths=[42*mm,42*mm,24*mm,22*mm,28*mm,28*mm],repeatRows=1); table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.25,colors.grey),('ALIGN',(3,1),(-1,-1),'RIGHT'),('FONTSIZE',(0,0),(-1,-1),7.5),('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold')]))
-    story.append(table); doc.build(story); buf.seek(0); return send_file(buf,mimetype='application/pdf',as_attachment=True,download_name=f'category_report_{start}_to_{end}.pdf')
+    story.append(table); doc.build(story); buf.seek(0); return send_file(buf,mimetype='application/pdf',as_attachment=request.args.get('share')!='1',download_name=f'category_report_{start}_to_{end}.pdf')
 
 @app.route('/system')
 @admin_required
@@ -1229,7 +1235,7 @@ def quick_entry():
                     flash('Receipt scanned. Check the details, then tap Save pending.','ok')
             else:
                 account_id=int(request.form.get('account_id') or quick_id)
-                account=conn.execute("SELECT * FROM accounts WHERE id=? AND active=1",(account_id,)).fetchone()
+                account=conn.execute("SELECT * FROM accounts WHERE id=? AND active=1 AND account_type NOT IN ('pension','other_asset','liability')",(account_id,)).fetchone()
                 if not account: raise ValueError('Choose a valid account.')
                 description=values['description'].strip()
                 if not description: raise ValueError('Description is required.')
@@ -1265,8 +1271,13 @@ def pending_entries():
 def post_pending(pid):
     conn=db(); user=current_user(); p=conn.execute('SELECT * FROM pending_transactions WHERE id=?',(pid,)).fetchone()
     if not p: conn.close(); abort(404)
-    category_id=int(request.form['category_id']) if request.form.get('category_id') else None
-    amount=abs(float(request.form['amount']))
+    try:
+        category_id=int(request.form['category_id']) if request.form.get('category_id') else None
+        amount=abs(float(request.form['amount']))
+    except (ValueError,TypeError,KeyError):
+        conn.close(); flash('Enter a valid amount and category.','error'); return redirect(url_for('pending_entries'))
+    if amount<=0:
+        conn.close(); flash('Amount must be greater than zero.','error'); return redirect(url_for('pending_entries'))
     entry_type=request.form.get('entry_type') or p['entry_type'] or ('expense' if float(p['amount'])<0 else 'income')
     if entry_type not in ('expense','income'): entry_type='expense'
     if category_id:
@@ -1364,7 +1375,7 @@ def account_pdf(account_id):
     for t in tx: data.append([t['tx_date'],t['description'],t['category_name'] or '',t['tag_text'] or '',f'{t["amount"]:,.2f}'])
     table=Table(data,colWidths=[25*mm,65*mm,38*mm,30*mm,25*mm],repeatRows=1); table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.25,colors.grey),('ALIGN',(-1,1),(-1,-1),'RIGHT'),('FONTSIZE',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'TOP')]))
     story.append(table); doc.build(story); buf.seek(0)
-    return send_file(buf,mimetype='application/pdf',as_attachment=True,download_name=f'{a["name"].replace(" ","_")}_statement.pdf')
+    return send_file(buf,mimetype='application/pdf',as_attachment=request.args.get('share')!='1',download_name=f'{a["name"].replace(" ","_")}_statement.pdf')
 
 @app.route('/report/net-worth.pdf')
 @login_required
@@ -1376,7 +1387,7 @@ def networth_pdf():
     data.append(['','Net Worth',f'{total:,.2f}'])
     conn.close(); buf=io.BytesIO(); doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=15*mm,leftMargin=15*mm,topMargin=15*mm,bottomMargin=15*mm); styles=getSampleStyleSheet(); story=[Paragraph(get_setting('household_name','Household Finance'),styles['Title']),Paragraph(f'Net Worth Statement — {date.today().isoformat()}',styles['Heading2']),Paragraph(f'GBP/EUR rate used: {fx:.4f}',styles['Normal']),Spacer(1,6*mm)]
     table=Table(data,colWidths=[80*mm,50*mm,50*mm],repeatRows=1); table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.25,colors.grey),('ALIGN',(-1,1),(-1,-1),'RIGHT'),('FONTSIZE',(0,0),(-1,-1),8),('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold')]))
-    story.append(table); doc.build(story); buf.seek(0); return send_file(buf,mimetype='application/pdf',as_attachment=True,download_name='net_worth_statement.pdf')
+    story.append(table); doc.build(story); buf.seek(0); return send_file(buf,mimetype='application/pdf',as_attachment=request.args.get('share')!='1',download_name='net_worth_statement.pdf')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT','8080')), debug=False)
