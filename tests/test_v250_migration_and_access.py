@@ -42,7 +42,7 @@ def test_status_contains_information_settings_remains_configurable(appmod):
     appmod.set_setting('licensed_to','Steph'); appmod.set_setting('licence_number','FT-KEEP')
     client=appmod.app.test_client(); login_as(client,appmod,'admin')
     status=client.get('/system'); settings=client.get('/settings')
-    assert status.status_code==200 and b'Status' in status.data and b'FT-KEEP' in status.data and b'2.5.0' in status.data
+    assert status.status_code==200 and b'Status' in status.data and b'FT-KEEP' in status.data and appmod.APP_VERSION.encode() in status.data
     assert settings.status_code==200 and b'Licence Configuration' in settings.data
     assert b'Information</h2>' not in settings.data
 

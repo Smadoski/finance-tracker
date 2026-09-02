@@ -1,5 +1,7 @@
 """Flask routes for category targets and budget reporting."""
 
+import sqlite3
+
 from datetime import date
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
@@ -47,14 +49,15 @@ def create_blueprint(db, login_required, current_user, category_options, get_set
         if not target: conn.close(); abort(404)
         if request.method=='POST':
             try:
-                amount=abs(float(request.form['target_amount'])); period=request.form['period']; currency=request.form['currency']
-                if period not in ('weekly','monthly','quarterly','yearly') or currency not in ('GBP','EUR'): raise ValueError('Choose valid target options.')
-                conn.execute('UPDATE category_targets SET target_amount=?,currency=?,period=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                             (amount,currency,period,1 if request.form.get('active')=='1' else 0,target_id)); conn.commit(); conn.close(); flash('Category target updated.','ok'); return redirect(url_for('budgets.index'))
-            except (ValueError,TypeError,KeyError) as exc:
+                category_id=int(request.form['category_id']); amount=abs(float(request.form['target_amount'])); period=request.form['period']; currency=request.form['currency']
+                category=conn.execute("SELECT id FROM categories WHERE id=? AND kind='expense'",(category_id,)).fetchone()
+                if not category or period not in ('weekly','monthly','quarterly','yearly') or currency not in ('GBP','EUR'): raise ValueError('Choose valid target options.')
+                conn.execute('UPDATE category_targets SET category_id=?,target_amount=?,currency=?,period=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                             (category_id,amount,currency,period,1 if request.form.get('active')=='1' else 0,target_id)); conn.commit(); conn.close(); flash('Category target updated.','ok'); return redirect(url_for('budgets.index'))
+            except (ValueError,TypeError,KeyError,sqlite3.IntegrityError) as exc:
                 conn.rollback(); flash(str(exc),'error')
-        target=conn.execute('SELECT * FROM category_targets WHERE id=?',(target_id,)).fetchone(); category=conn.execute('SELECT c.name,p.name parent_name FROM categories c LEFT JOIN categories p ON p.id=c.parent_id WHERE c.id=?',(target['category_id'],)).fetchone(); conn.close()
-        return render_template('budget_edit.html',target=target,category=category)
+        target=conn.execute('SELECT * FROM category_targets WHERE id=?',(target_id,)).fetchone(); categories=category_options(conn,('expense',)); conn.close()
+        return render_template('budget_edit.html',target=target,categories=categories)
 
     @bp.post('/<int:target_id>/delete')
     @login_required
