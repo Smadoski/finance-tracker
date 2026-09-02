@@ -7,6 +7,10 @@ from finance_tracker.reports import display_report_values
 from finance_tracker.settings import security_summary as build_security_summary
 from finance_tracker.receipts import save_receipt as receipt_save, delete_if_unreferenced
 from finance_tracker.accounts import account_balance as service_account_balance
+from finance_tracker.migrations import migrate_v250
+from finance_tracker.recurring import process_due_path, start_scheduler
+from finance_tracker.recurring_routes import create_blueprint as create_recurring_blueprint
+from finance_tracker.budget_routes import create_blueprint as create_budget_blueprint
 import certifi
 from datetime import date, datetime
 from calendar import monthrange
@@ -161,7 +165,7 @@ def init_db():
         ('Insurance','expense'),('Travel','expense'),('Household','expense'),('Transfer','transfer')
     ]:
         conn.execute('INSERT OR IGNORE INTO categories(name,kind) VALUES (?,?)',(name,kind))
-    conn.commit(); conn.close()
+    conn.commit(); migrate_v250(conn); conn.close()
 
 init_db()
 
@@ -1124,7 +1128,7 @@ def category_report_pdf():
 @app.route('/system')
 @admin_required
 def system_status():
-    return render_template('system.html',tailscale=tailscale_status(),local_url='http://127.0.0.1:8080')
+    return render_template('system.html',tailscale=tailscale_status(),local_url='http://127.0.0.1:8080',licensed_to=get_setting('licensed_to',''),licence_number=get_setting('licence_number',''))
 
 @app.route('/settings', methods=['GET','POST'])
 @admin_required
@@ -1388,6 +1392,14 @@ def networth_pdf():
     conn.close(); buf=io.BytesIO(); doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=15*mm,leftMargin=15*mm,topMargin=15*mm,bottomMargin=15*mm); styles=getSampleStyleSheet(); story=[Paragraph(get_setting('household_name','Household Finance'),styles['Title']),Paragraph(f'Net Worth Statement — {date.today().isoformat()}',styles['Heading2']),Paragraph(f'GBP/EUR rate used: {fx:.4f}',styles['Normal']),Spacer(1,6*mm)]
     table=Table(data,colWidths=[80*mm,50*mm,50*mm],repeatRows=1); table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.25,colors.grey),('ALIGN',(-1,1),(-1,-1),'RIGHT'),('FONTSIZE',(0,0),(-1,-1),8),('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold')]))
     story.append(table); doc.build(story); buf.seek(0); return send_file(buf,mimetype='application/pdf',as_attachment=request.args.get('share')!='1',download_name='net_worth_statement.pdf')
+
+app.register_blueprint(create_recurring_blueprint(db,login_required,current_user,category_options))
+app.register_blueprint(create_budget_blueprint(db,login_required,current_user,category_options,get_setting,latest_fx))
+
+if os.environ.get('FINANCE_DISABLE_SCHEDULER','0')!='1':
+    try: process_due_path(DB_PATH)
+    except Exception: pass
+    _scheduler_thread,_scheduler_stop=start_scheduler(DB_PATH)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT','8080')), debug=False)

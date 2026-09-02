@@ -3,6 +3,7 @@ import pytest
 
 @pytest.fixture()
 def appmod(tmp_path, monkeypatch):
+    monkeypatch.setenv('FINANCE_DISABLE_SCHEDULER','1')
     source=os.path.dirname(os.path.dirname(__file__))
     sandbox=tmp_path/'app'
     shutil.copytree(source,sandbox,ignore=shutil.ignore_patterns('data','.venv','__pycache__'))
