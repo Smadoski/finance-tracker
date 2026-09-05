@@ -28,3 +28,13 @@
 @media(max-width:900px){header{padding:12px 16px}.nav-menu{width:100%}.nav-menu>summary{display:block;cursor:pointer;color:#185d8c;font-weight:700;padding:10px 0}.nav-menu:not([open])>nav{display:none}.nav-menu nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.nav-menu nav a{background:#f3f6f8;border-radius:8px;padding:10px}.section-grid{grid-template-columns:1fr}.item-summary{gap:10px}}
 @media(max-width:700px){body{overflow-x:hidden}main{width:100%}.nav-menu nav{grid-template-columns:repeat(2,1fr)}.item-card{padding:14px}.item-summary{display:block}.page-actions>*{flex:1 1 auto;text-align:center}.mobile-cards thead{display:none}.mobile-cards,.mobile-cards tbody,.mobile-cards tr,.mobile-cards td{display:block;width:100%}.mobile-cards tr{padding:10px 0;border-bottom:2px solid #dfe4e8}.mobile-cards td{display:grid;grid-template-columns:minmax(82px,32%) minmax(0,1fr);gap:10px;border:0;padding:7px 0;white-space:normal;text-align:left}.mobile-cards td::before{content:attr(data-label);font-weight:700;color:#5d6872}.mobile-cards td[colspan]{display:block}.mobile-cards td[colspan]::before{content:none}.filter-panel>summary,.settings-panel>summary,.disclosure>summary{padding:14px}.filter-body,.settings-body,.disclosure-body{padding:0 14px 14px}}
 @media(max-width:430px){.nav-menu nav{grid-template-columns:1fr 1fr}.metric b{font-size:1.25rem}.card h2{font-size:1.15rem}.summary-line{font-size:.9rem}}
+/* v2.6.1: one navigation tree, visible desktop links and a native mobile toggle. */
+header{position:static;flex-wrap:wrap;align-items:flex-start}
+header .brand{min-width:0;max-width:100%;overflow-wrap:anywhere}
+.nav-menu{min-width:0;max-width:100%;flex:1 1 100%}
+.nav-menu>summary{display:block;cursor:pointer;min-height:44px;padding:10px 0;color:#185d8c;font-weight:700}
+.nav-menu nav{min-width:0;gap:8px}
+.nav-menu nav a{display:flex;align-items:center;min-height:44px;padding:10px 12px;border-radius:8px;line-height:1.35}
+.nav-menu nav a[aria-current="page"]{background:#185d8c;color:#fff;font-weight:700}
+@media(min-width:901px){.nav-menu[open]>summary{display:none}.nav-menu nav a{white-space:nowrap;flex:0 0 auto}}
+@media(max-width:900px){.nav-menu>summary{min-height:44px}.nav-menu nav{grid-template-columns:repeat(2,minmax(0,1fr))}.nav-menu nav a{overflow-wrap:anywhere}}

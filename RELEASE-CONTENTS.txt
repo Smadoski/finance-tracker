@@ -1,11 +1,11 @@
-Finance Tracker v2.6.0 release contents
+Finance Tracker v2.6.1 release contents
 
 - Application source, templates and static assets
 - Python runtime and development requirements
 - Automated regression tests
 - macOS service and installer tooling
 - Windows start helper
-- v2.6.0 update notes and deep test report
+- v2.6.1 update notes and deep test report
 
 Excluded from the release:
 
