@@ -1,5 +1,10 @@
+from decimal import Decimal
+
 def convert(value, currency, base, fx):
-    value = float(value)
+    if isinstance(value, Decimal):
+        fx = Decimal(str(fx))
+    else:
+        value = float(value)
     if currency == base:
         return value
     if currency == "GBP" and base == "EUR":

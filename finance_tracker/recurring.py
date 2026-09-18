@@ -8,9 +8,10 @@ from datetime import date, datetime, timedelta
 
 from .database import connect
 from .holidays import CALENDARS, is_working_day
+from .frequencies import FREQUENCY_LABELS
 
 
-FREQUENCIES={'daily','weekly','monthly','quarterly','annually'}
+FREQUENCIES=set(FREQUENCY_LABELS)
 ADJUSTMENTS={'exact','previous','next'}
 POSTING_MODES={'automatic','pending'}
 
@@ -31,6 +32,11 @@ def next_scheduled_date(current, frequency, start_date):
     current=parse_date(current); start=parse_date(start_date)
     if frequency=='daily': return current+timedelta(days=1)
     if frequency=='weekly': return current+timedelta(days=7)
+    if frequency=='fortnightly': return current+timedelta(days=14)
+    if frequency=='four_weekly': return current+timedelta(days=28)
+    if frequency=='first_day': return month_shift(current,1,1)
+    if frequency=='last_day': return month_shift(current,1,31)
+    if frequency=='six_monthly': return month_shift(current,6,start.day)
     if frequency=='monthly': return month_shift(current,1,start.day)
     if frequency=='quarterly': return month_shift(current,3,start.day)
     if frequency=='annually': return month_shift(current,12,start.day)
@@ -50,8 +56,8 @@ def adjust_working_day(value, adjustment, calendar="weekdays"):
 
 
 def validate_rule(conn, data):
-    calendar=data.get('holiday_calendar','weekdays')
-    if calendar not in CALENDARS: raise ValueError('Choose a valid bank calendar.')
+    holiday_calendar=data.get('holiday_calendar','weekdays')
+    if holiday_calendar not in CALENDARS: raise ValueError('Choose a valid bank calendar.')
     tx_type=data['transaction_type']; frequency=data['frequency']; adjustment=data['working_day_adjustment']; mode=data['posting_mode']
     if tx_type not in ('expense','income','transfer'): raise ValueError('Choose a valid transaction type.')
     if frequency not in FREQUENCIES or adjustment not in ADJUSTMENTS or mode not in POSTING_MODES: raise ValueError('Choose valid scheduling options.')
@@ -74,10 +80,16 @@ def validate_rule(conn, data):
         if not category or category['kind']!=tx_type: raise ValueError('Choose a category matching the transaction type.')
     start=parse_date(data['start_date']); end=parse_date(data['end_date']) if data.get('end_date') else None
     if end and end<start: raise ValueError('End date cannot be before start date.')
+    next_date=parse_date(data.get('next_scheduled_date') or start)
+    if frequency=='first_day':
+        next_date=next_date if next_date.day==1 else month_shift(next_date,1,1)
+    elif frequency=='last_day':
+        next_date=next_date.replace(day=calendar.monthrange(next_date.year,next_date.month)[1])
+    if end and next_date>end: raise ValueError('No scheduled date falls within the selected dates.')
     return dict(description=(data.get('description') or '').strip(),transaction_type=tx_type,account_id=account_id,to_account_id=to_account_id,
                 amount=amount,to_amount=to_amount,category_id=category_id,start_date=start.isoformat(),end_date=end.isoformat() if end else None,
-                next_scheduled_date=(parse_date(data.get('next_scheduled_date') or start)).isoformat(),frequency=frequency,
-                holiday_calendar=calendar,working_day_adjustment=adjustment,posting_mode=mode,active=1 if data.get('active',True) else 0)
+                next_scheduled_date=next_date.isoformat(),frequency=frequency,
+                holiday_calendar=holiday_calendar,working_day_adjustment=adjustment,posting_mode=mode,active=1 if data.get('active',True) else 0)
 
 
 def _post_occurrence(conn, rule, scheduled, posting, force_post=False):

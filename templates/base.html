@@ -30,11 +30,22 @@ if (navigation) {
   });
 }
 function inlinePdfUrl(url){const u=new URL(url,window.location.href);u.searchParams.set('share','1');return u.toString();}
+function printPdf(url){
+  // Native PDF viewers retain authenticated HTTPS/Tailnet access and expose platform Print.
+  window.location.assign(inlinePdfUrl(url));
+}
 async function sharePdf(url,title){
-  // Safari exposes the native iOS Share Sheet from its inline PDF viewer.
-  // Web Share file payloads have proved unreliable for generated PDFs on iPhone.
   if(isIOSDevice()){window.location.assign(inlinePdfUrl(url));return;}
-  try{const r=await fetch(url,{credentials:'same-origin'});if(!r.ok)throw new Error('download');const blob=await r.blob();const f=new File([blob],(title||'Finance Tracker Report')+'.pdf',{type:'application/pdf'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({title:title||'Finance Tracker Report',files:[f]});return;}}catch(e){}
-  window.location.href=url;
+  try{
+    const r=await fetch(inlinePdfUrl(url),{credentials:'same-origin'});
+    if(!r.ok || !(r.headers.get('content-type')||'').includes('application/pdf'))throw new Error('PDF unavailable');
+    const f=new File([await r.blob()],(title||'Finance Tracker Report')+'.pdf',{type:'application/pdf'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({title:title||'Finance Tracker Report',files:[f]});return;}
+  }catch(e){if(e.name==='AbortError')return;}
+  window.location.assign(inlinePdfUrl(url));
+}
+function categoryPdfAction(form,action){
+  const u=new URL(form.dataset.pdfUrl,window.location.href);u.search=new URLSearchParams(new FormData(form));
+  if(action==='share')sharePdf(u.toString(),'Category Report');else if(action==='print')printPdf(u.toString());else window.location.assign(inlinePdfUrl(u.toString()));
 }
 </script></body></html>
