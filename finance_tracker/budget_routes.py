@@ -5,7 +5,7 @@ import sqlite3
 from datetime import date
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
-from .budgets import target_report
+from .target_projection import projected_targets as target_report
 
 
 def create_blueprint(db, login_required, current_user, category_options, get_setting, latest_fx):

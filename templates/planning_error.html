@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<h1>Check your selection</h1><p class="flash error">{{message}}</p><a href="{{url_for('planning.search')}}">Transaction search</a> · <a href="{{url_for('planning.csv_import')}}">Start CSV import</a>{% endblock %}

@@ -7,10 +7,12 @@ from finance_tracker.reports import display_report_values
 from finance_tracker.settings import security_summary as build_security_summary
 from finance_tracker.receipts import save_receipt as receipt_save, delete_if_unreferenced
 from finance_tracker.accounts import account_balance as service_account_balance
-from finance_tracker.migrations import migrate_v250
-from finance_tracker.recurring import process_due_path, start_scheduler
+from finance_tracker.migrations import migrate_v250, migrate_v270, migrate_v280
+from finance_tracker.recurring import process_due_path, start_scheduler, resolve_pending_occurrence
 from finance_tracker.recurring_routes import create_blueprint as create_recurring_blueprint
 from finance_tracker.budget_routes import create_blueprint as create_budget_blueprint
+from finance_tracker.planning_routes import create_blueprint as create_planning_blueprint, dashboard_summary
+from finance_tracker.recurring_report_routes import create_blueprint as create_recurring_report_blueprint
 import certifi
 from datetime import date, datetime
 from calendar import monthrange
@@ -165,7 +167,7 @@ def init_db():
         ('Insurance','expense'),('Travel','expense'),('Household','expense'),('Transfer','transfer')
     ]:
         conn.execute('INSERT OR IGNORE INTO categories(name,kind) VALUES (?,?)',(name,kind))
-    conn.commit(); migrate_v250(conn); conn.close()
+    conn.commit(); migrate_v250(conn); migrate_v270(conn); migrate_v280(conn); conn.close()
 
 init_db()
 
@@ -726,8 +728,9 @@ def dashboard():
         selected_id=get_setting(setting_key,'')
         match=next((x for x in rows if str(x['id'])==str(selected_id)),None) if selected_id else None
         if match: selected_native.append(match)
+    planning=dashboard_summary(conn,get_setting('base_currency','GBP'),fx)
     conn.close()
-    return render_template('dashboard.html',accounts=rows,total=totals,liquid=liquid,pensions=pensions,liabilities=liabilities,other_assets=other_assets,fx=fx,recent=recent,selected_native=selected_native)
+    return render_template('dashboard.html',planning=planning,accounts=rows,total=totals,liquid=liquid,pensions=pensions,liabilities=liabilities,other_assets=other_assets,fx=fx,recent=recent,selected_native=selected_native)
 
 @app.route('/accounts', methods=['GET','POST'])
 @login_required
@@ -928,17 +931,19 @@ def reclassify_transactions():
 @app.route('/transaction/<int:txid>/delete', methods=['POST'])
 @login_required
 def delete_transaction(txid):
-    conn=db(); row=conn.execute('SELECT id,transfer_group,receipt_path FROM transactions WHERE id=?',(txid,)).fetchone()
-    if not row: conn.close(); abort(404)
-    receipts=[]
-    if row['transfer_group']:
-        pair=conn.execute('SELECT receipt_path FROM transactions WHERE transfer_group=?',(row['transfer_group'],)).fetchall(); receipts=[r['receipt_path'] for r in pair if r['receipt_path']]; conn.execute('DELETE FROM transactions WHERE transfer_group=?',(row['transfer_group'],)); message='Transfer and both linked account entries deleted.'
-    else:
-        if row['receipt_path']: receipts=[row['receipt_path']]
-        conn.execute('DELETE FROM transactions WHERE id=?',(txid,)); message='Transaction deleted.'
-    conn.commit()
-    for filename in set(receipts): delete_if_unreferenced(conn,RECEIPT_DIR,filename)
-    conn.close(); flash(message,'ok'); return redirect(request.referrer or url_for('transactions'))
+    from finance_tracker.transactions import delete_transaction_atomic
+    conn=db()
+    try:
+        result=delete_transaction_atomic(conn,txid)
+        if result is None: abort(404)
+        for filename in result['receipts']:
+            try: delete_if_unreferenced(conn,RECEIPT_DIR,filename)
+            except OSError:
+                app.logger.exception('Receipt cleanup failed after transaction deletion')
+                flash('Transaction deleted; an unused receipt could not be removed.','error')
+        flash('Transfer and both linked account entries deleted.' if result['transfer'] else 'Transaction deleted.','ok')
+    finally: conn.close()
+    return redirect(url_for('transactions'))
 
 @app.route('/transfer', methods=['GET','POST'])
 @login_required
@@ -1290,6 +1295,8 @@ def post_pending(pid):
     amount=-amount if entry_type=='expense' else amount
     conn.execute('''INSERT INTO transactions(account_id,tx_date,description,amount,category_id,tag_text,notes,receipt_path,created_by)
                     VALUES (?,?,?,?,?,?,?,?,?)''',(p['account_id'],safe_date(request.form.get('tx_date'),p['tx_date']),request.form.get('description','').strip() or p['description'],amount,category_id,'Quick Entry',request.form.get('notes','').strip(),p['receipt_path'],user['id']))
+    transaction_id=conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+    resolve_pending_occurrence(conn,pid,transaction_id)
     conn.execute('DELETE FROM pending_transactions WHERE id=?',(pid,)); conn.commit(); conn.close(); flash('Pending entry posted to the account.','ok')
     return redirect(url_for('pending_entries'))
 
@@ -1298,6 +1305,7 @@ def post_pending(pid):
 def delete_pending(pid):
     conn=db(); p=conn.execute('SELECT receipt_path FROM pending_transactions WHERE id=?',(pid,)).fetchone()
     if p:
+        resolve_pending_occurrence(conn,pid)
         conn.execute('DELETE FROM pending_transactions WHERE id=?',(pid,)); conn.commit()
         if p['receipt_path']:
             delete_if_unreferenced(conn,RECEIPT_DIR,p['receipt_path'])
@@ -1393,6 +1401,8 @@ def networth_pdf():
     table=Table(data,colWidths=[80*mm,50*mm,50*mm],repeatRows=1); table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.25,colors.grey),('ALIGN',(-1,1),(-1,-1),'RIGHT'),('FONTSIZE',(0,0),(-1,-1),8),('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold')]))
     story.append(table); doc.build(story); buf.seek(0); return send_file(buf,mimetype='application/pdf',as_attachment=request.args.get('share')!='1',download_name='net_worth_statement.pdf')
 
+app.register_blueprint(create_recurring_report_blueprint(db,login_required,get_setting,latest_fx,APP_VERSION))
+app.register_blueprint(create_planning_blueprint(db,login_required,current_user,get_setting,latest_fx,APP_VERSION))
 app.register_blueprint(create_recurring_blueprint(db,login_required,current_user,category_options))
 app.register_blueprint(create_budget_blueprint(db,login_required,current_user,category_options,get_setting,latest_fx))
 

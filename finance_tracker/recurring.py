@@ -7,9 +7,11 @@ import time
 from datetime import date, datetime, timedelta
 
 from .database import connect
+from .holidays import CALENDARS, is_working_day
+from .frequencies import FREQUENCY_LABELS
 
 
-FREQUENCIES={'daily','weekly','monthly','quarterly','annually'}
+FREQUENCIES=set(FREQUENCY_LABELS)
 ADJUSTMENTS={'exact','previous','next'}
 POSTING_MODES={'automatic','pending'}
 
@@ -30,25 +32,32 @@ def next_scheduled_date(current, frequency, start_date):
     current=parse_date(current); start=parse_date(start_date)
     if frequency=='daily': return current+timedelta(days=1)
     if frequency=='weekly': return current+timedelta(days=7)
+    if frequency=='fortnightly': return current+timedelta(days=14)
+    if frequency=='four_weekly': return current+timedelta(days=28)
+    if frequency=='first_day': return month_shift(current,1,1)
+    if frequency=='last_day': return month_shift(current,1,31)
+    if frequency=='six_monthly': return month_shift(current,6,start.day)
     if frequency=='monthly': return month_shift(current,1,start.day)
     if frequency=='quarterly': return month_shift(current,3,start.day)
     if frequency=='annually': return month_shift(current,12,start.day)
     raise ValueError('Unsupported recurring frequency.')
 
 
-def adjust_working_day(value, adjustment):
+def adjust_working_day(value, adjustment, calendar="weekdays"):
     value=parse_date(value)
     if adjustment=='exact': return value
     if adjustment=='previous':
-        while value.weekday()>=5: value-=timedelta(days=1)
+        while not is_working_day(value, calendar): value-=timedelta(days=1)
         return value
     if adjustment=='next':
-        while value.weekday()>=5: value+=timedelta(days=1)
+        while not is_working_day(value, calendar): value+=timedelta(days=1)
         return value
     raise ValueError('Unsupported working-day adjustment.')
 
 
 def validate_rule(conn, data):
+    holiday_calendar=data.get('holiday_calendar','weekdays')
+    if holiday_calendar not in CALENDARS: raise ValueError('Choose a valid bank calendar.')
     tx_type=data['transaction_type']; frequency=data['frequency']; adjustment=data['working_day_adjustment']; mode=data['posting_mode']
     if tx_type not in ('expense','income','transfer'): raise ValueError('Choose a valid transaction type.')
     if frequency not in FREQUENCIES or adjustment not in ADJUSTMENTS or mode not in POSTING_MODES: raise ValueError('Choose valid scheduling options.')
@@ -71,10 +80,16 @@ def validate_rule(conn, data):
         if not category or category['kind']!=tx_type: raise ValueError('Choose a category matching the transaction type.')
     start=parse_date(data['start_date']); end=parse_date(data['end_date']) if data.get('end_date') else None
     if end and end<start: raise ValueError('End date cannot be before start date.')
+    next_date=parse_date(data.get('next_scheduled_date') or start)
+    if frequency=='first_day':
+        next_date=next_date if next_date.day==1 else month_shift(next_date,1,1)
+    elif frequency=='last_day':
+        next_date=next_date.replace(day=calendar.monthrange(next_date.year,next_date.month)[1])
+    if end and next_date>end: raise ValueError('No scheduled date falls within the selected dates.')
     return dict(description=(data.get('description') or '').strip(),transaction_type=tx_type,account_id=account_id,to_account_id=to_account_id,
                 amount=amount,to_amount=to_amount,category_id=category_id,start_date=start.isoformat(),end_date=end.isoformat() if end else None,
-                next_scheduled_date=(parse_date(data.get('next_scheduled_date') or start)).isoformat(),frequency=frequency,
-                working_day_adjustment=adjustment,posting_mode=mode,active=1 if data.get('active',True) else 0)
+                next_scheduled_date=next_date.isoformat(),frequency=frequency,
+                holiday_calendar=holiday_calendar,working_day_adjustment=adjustment,posting_mode=mode,active=1 if data.get('active',True) else 0)
 
 
 def _post_occurrence(conn, rule, scheduled, posting, force_post=False):
@@ -104,7 +119,7 @@ def _post_occurrence(conn, rule, scheduled, posting, force_post=False):
 
 
 def process_rule_occurrence(conn, rule, scheduled_date, status_override=None, force_post=False):
-    scheduled=parse_date(scheduled_date); posting=adjust_working_day(scheduled,rule['working_day_adjustment'])
+    scheduled=parse_date(scheduled_date); posting=adjust_working_day(scheduled,rule['working_day_adjustment'],dict(rule).get('holiday_calendar','weekdays'))
     existing=conn.execute('SELECT * FROM recurring_occurrences WHERE rule_id=? AND scheduled_date=?',(rule['id'],scheduled.isoformat())).fetchone()
     if existing: return existing
     if status_override=='skipped':
@@ -144,7 +159,7 @@ def process_due(conn, today=None, max_occurrences=1000):
         for original in rules:
             rule=original
             scheduled=parse_date(rule['next_scheduled_date'])
-            while adjust_working_day(scheduled,rule['working_day_adjustment'])<=today and count<max_occurrences:
+            while adjust_working_day(scheduled,rule['working_day_adjustment'],dict(rule).get('holiday_calendar','weekdays'))<=today and count<max_occurrences:
                 if rule['end_date'] and scheduled>parse_date(rule['end_date']):
                     conn.execute('UPDATE recurring_rules SET active=0 WHERE id=?',(rule['id'],)); break
                 processed.append(process_rule_occurrence(conn,rule,scheduled)); count+=1
@@ -172,3 +187,11 @@ def start_scheduler(db_path, interval_seconds=300, stop_event=None):
             stop_event.wait(interval_seconds)
     thread=threading.Thread(target=run,name='finance-recurring-scheduler',daemon=True); thread.start()
     return thread,stop_event
+
+
+def resolve_pending_occurrence(conn, pending_id, transaction_id=None):
+    """Release the pending FK while retaining the recurring audit trail."""
+    conn.execute('''UPDATE recurring_occurrences SET pending_id=NULL,status=?,transaction_id=?,detail=?
+                    WHERE pending_id=?''',
+        ('posted' if transaction_id else 'skipped',transaction_id,
+         'Pending entry posted after review' if transaction_id else 'Pending entry discarded after review',pending_id))

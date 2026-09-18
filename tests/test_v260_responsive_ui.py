@@ -50,7 +50,7 @@ def test_management_filters_settings_and_navigation_are_compact(appmod):
 def test_version_and_information_architecture(appmod):
     no_auth(appmod)
     client = appmod.app.test_client()
-    assert appmod.APP_VERSION == '2.6.1'
+    assert appmod.APP_VERSION == '2.8.0'
     status = page(client, '/system')
     settings = page(client, '/settings')
     assert appmod.APP_VERSION.encode() in status and b'Licensed To' in status
