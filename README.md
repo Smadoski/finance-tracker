@@ -1,8 +1,10 @@
-# Household Finance Tracker v1.0
+# Household Finance Tracker v2.7.0
 
 A private, self-hosted finance tracker designed for a Mac mini and shared household use.
 
-## Included in v1.0
+See [v2.7.0 release and migration notes](UPDATE-v2.7.0.md) for financial planning, forecasting, search, CSV and AI Financial Review.
+
+## Original core features
 
 - GBP and EUR accounts
 - Current, savings, cash and Premium Bond accounts

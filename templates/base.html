@@ -3,9 +3,9 @@
 {% set active = request.endpoint == endpoint or ('.' in endpoint and request.blueprint == endpoint.split('.')[0]) %}
 <a href="{{url_for(endpoint)}}"{% if active %} aria-current="page"{% endif %}>{{label}}</a>
 {%- endmacro %}
-<header><div class="brand"><img src="{{ url_for('static',filename='adams-home-logo.png') }}" alt="Adams-Home"><strong>{{ household_name }}</strong></div>
+<header><div class="brand"><span class="brand-logo"><img src="{{ url_for('static',filename='adams-home-logo.png') }}" alt="Adams-Home"></span><strong>{{ household_name }}</strong></div>
 {% if current_user %}<details class="nav-menu" open><summary aria-controls="primary-navigation">☰ Menu</summary><nav id="primary-navigation" aria-label="Main navigation">
-{{nav_link('dashboard','Dashboard')}}{{nav_link('quick_entry','Quick Entry')}}{{nav_link('pending_entries','Pending')}}{{nav_link('accounts','Accounts')}}{{nav_link('transactions','Transactions')}}{{nav_link('transfer','Transfer')}}{{nav_link('recurring.index','Recurring')}}{{nav_link('valuations','Valuations')}}{{nav_link('categories','Categories')}}{{nav_link('category_report','Reports')}}{{nav_link('budgets.report','Targets')}}
+{{nav_link('dashboard','Dashboard')}}{{nav_link('quick_entry','Quick Entry')}}{{nav_link('pending_entries','Pending')}}{{nav_link('accounts','Accounts')}}{{nav_link('transactions','Transactions')}}{{nav_link('transfer','Transfer')}}{{nav_link('recurring.index','Recurring')}}{{nav_link('planning.upcoming_view','Upcoming')}}{{nav_link('planning.forecast_view','Forecast')}}{{nav_link('valuations','Valuations')}}{{nav_link('categories','Categories')}}{{nav_link('category_report','Reports')}}{{nav_link('budgets.report','Targets')}}
 {% if current_user['role']=='admin' %}{{nav_link('settings','Settings')}}{{nav_link('system_status','Status')}}{{nav_link('users','Users')}}{% endif %}
 {% if auth_required=='1' %}<a href="{{url_for('logout')}}">Sign out</a>{% endif %}{% if current_user.role=='readonly' %}<span class="status-badge">Read Only</span>{% endif %}
 </nav></details>{% endif %}</header>

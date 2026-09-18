@@ -19,8 +19,8 @@ def create_blueprint(db, login_required, current_user, category_options):
                 form['active']=request.form.get('active')=='1'
                 values=validate_rule(conn,form)
                 user=current_user()
-                conn.execute("""INSERT INTO recurring_rules(description,transaction_type,account_id,to_account_id,amount,to_amount,category_id,start_date,end_date,next_scheduled_date,frequency,working_day_adjustment,posting_mode,active,created_by)
-                                VALUES(:description,:transaction_type,:account_id,:to_account_id,:amount,:to_amount,:category_id,:start_date,:end_date,:next_scheduled_date,:frequency,:working_day_adjustment,:posting_mode,:active,:created_by)""",
+                conn.execute("""INSERT INTO recurring_rules(description,transaction_type,account_id,to_account_id,amount,to_amount,category_id,start_date,end_date,next_scheduled_date,frequency,working_day_adjustment,holiday_calendar,posting_mode,active,created_by)
+                                VALUES(:description,:transaction_type,:account_id,:to_account_id,:amount,:to_amount,:category_id,:start_date,:end_date,:next_scheduled_date,:frequency,:working_day_adjustment,:holiday_calendar,:posting_mode,:active,:created_by)""",
                              dict(values,created_by=user['id']))
                 conn.commit(); flash('Recurring transaction added.','ok')
             except (ValueError,TypeError) as exc:
@@ -59,7 +59,7 @@ def create_blueprint(db, login_required, current_user, category_options):
                                 account_id=:account_id,to_account_id=:to_account_id,amount=:amount,to_amount=:to_amount,
                                 category_id=:category_id,start_date=:start_date,end_date=:end_date,
                                 next_scheduled_date=:next_scheduled_date,frequency=:frequency,
-                                working_day_adjustment=:working_day_adjustment,posting_mode=:posting_mode,
+                                working_day_adjustment=:working_day_adjustment,holiday_calendar=:holiday_calendar,posting_mode=:posting_mode,
                                 active=:active,updated_at=CURRENT_TIMESTAMP WHERE id=:id""",values)
                 conn.commit(); conn.close(); flash('Recurring transaction updated.','ok'); return redirect(url_for('recurring.index'))
             except (ValueError,TypeError) as exc:

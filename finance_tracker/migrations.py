@@ -62,3 +62,22 @@ def migrate_v250(conn):
     conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('schema_version','2.5.0')")
     conn.execute("UPDATE settings SET value='2.5.0' WHERE key='schema_version'")
     conn.commit()
+
+
+def migrate_v270(conn):
+    """Add calendar choice and search indexes without rewriting financial rows."""
+    columns={row[1] for row in conn.execute('PRAGMA table_info(recurring_rules)')}
+    if 'holiday_calendar' not in columns:
+        conn.execute("ALTER TABLE recurring_rules ADD COLUMN holiday_calendar TEXT NOT NULL DEFAULT 'weekdays' CHECK(holiday_calendar IN ('weekdays','uk','cyprus'))")
+    conn.executescript('''
+        CREATE INDEX IF NOT EXISTS idx_transaction_search_date ON transactions(tx_date,account_id);
+        CREATE INDEX IF NOT EXISTS idx_transaction_search_category ON transactions(category_id,tx_date);
+        CREATE INDEX IF NOT EXISTS idx_transaction_search_user ON transactions(created_by,tx_date);
+        CREATE TABLE IF NOT EXISTS csv_import_batches (
+            token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
+            payload TEXT NOT NULL, reviewed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    ''')
+    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('schema_version','2.7.0')")
+    conn.commit()
