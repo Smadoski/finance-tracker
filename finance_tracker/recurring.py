@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 
+from .classifications import copy_classification
 from .database import connect
 from .holidays import CALENDARS, is_working_day
 from .frequencies import FREQUENCY_LABELS
@@ -112,17 +113,31 @@ def _post_occurrence(conn, rule, scheduled, posting, force_post=False):
     if posting_mode=='pending':
         pending_id=conn.execute('INSERT INTO pending_transactions(account_id,tx_date,description,amount,category_id,entry_type,notes,created_by) VALUES(?,?,?,?,?,?,?,?)',
             (rule['account_id'],posting,description,amount,rule['category_id'],tx_type,'Created by recurring schedule',user_id)).lastrowid
+        copy_classification(conn, rule, 'pending_transactions', pending_id)
         return ('pending',None,pending_id,None,'Created as Pending for review')
     transaction_id=conn.execute('INSERT INTO transactions(account_id,tx_date,description,amount,category_id,tag_text,notes,created_by) VALUES(?,?,?,?,?,?,?,?)',
         (rule['account_id'],posting,description,amount,rule['category_id'],'Scheduled','Created by recurring schedule',user_id)).lastrowid
+    copy_classification(conn, rule, 'transactions', transaction_id)
     return ('posted',transaction_id,None,None,'Posted automatically')
+
+
+def effective_end_date(conn, rule):
+    end=dict(rule).get('end_date')
+    strategy_id=dict(rule).get('funding_strategy_id')
+    if strategy_id:
+        strategy=conn.execute('SELECT end_date FROM funding_strategies WHERE id=?',(strategy_id,)).fetchone()
+        if strategy and strategy['end_date']: end=min(end,strategy['end_date']) if end else strategy['end_date']
+    return end
 
 
 def process_rule_occurrence(conn, rule, scheduled_date, status_override=None, force_post=False):
     scheduled=parse_date(scheduled_date); posting=adjust_working_day(scheduled,rule['working_day_adjustment'],dict(rule).get('holiday_calendar','weekdays'))
     existing=conn.execute('SELECT * FROM recurring_occurrences WHERE rule_id=? AND scheduled_date=?',(rule['id'],scheduled.isoformat())).fetchone()
     if existing: return existing
-    if status_override=='skipped':
+    end=effective_end_date(conn,rule)
+    if end and scheduled>parse_date(end):
+        values=('skipped',None,None,None,'After rule / funding strategy end date')
+    elif status_override=='skipped':
         values=('skipped',None,None,None,'Skipped by user')
     else:
         values=_post_occurrence(conn,rule,scheduled.isoformat(),posting.isoformat(),force_post=force_post)
@@ -134,7 +149,8 @@ def process_rule_occurrence(conn, rule, scheduled_date, status_override=None, fo
 
 def advance_rule(conn, rule, scheduled):
     next_date=next_scheduled_date(scheduled,rule['frequency'],rule['start_date'])
-    active=0 if rule['end_date'] and next_date>parse_date(rule['end_date']) else int(rule['active'])
+    end=effective_end_date(conn,rule)
+    active=0 if end and next_date>parse_date(end) else int(rule['active'])
     conn.execute('UPDATE recurring_rules SET next_scheduled_date=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(next_date.isoformat(),active,rule['id']))
     return next_date
 
@@ -160,7 +176,8 @@ def process_due(conn, today=None, max_occurrences=1000):
             rule=original
             scheduled=parse_date(rule['next_scheduled_date'])
             while adjust_working_day(scheduled,rule['working_day_adjustment'],dict(rule).get('holiday_calendar','weekdays'))<=today and count<max_occurrences:
-                if rule['end_date'] and scheduled>parse_date(rule['end_date']):
+                end=effective_end_date(conn,rule)
+                if end and scheduled>parse_date(end):
                     conn.execute('UPDATE recurring_rules SET active=0 WHERE id=?',(rule['id'],)); break
                 processed.append(process_rule_occurrence(conn,rule,scheduled)); count+=1
                 scheduled=advance_rule(conn,rule,scheduled)
@@ -191,6 +208,9 @@ def start_scheduler(db_path, interval_seconds=300, stop_event=None):
 
 def resolve_pending_occurrence(conn, pending_id, transaction_id=None):
     """Release the pending FK while retaining the recurring audit trail."""
+    if transaction_id:
+        pending = conn.execute('SELECT * FROM pending_transactions WHERE id=?',(pending_id,)).fetchone()
+        if pending: copy_classification(conn, pending, 'transactions', transaction_id)
     conn.execute('''UPDATE recurring_occurrences SET pending_id=NULL,status=?,transaction_id=?,detail=?
                     WHERE pending_id=?''',
         ('posted' if transaction_id else 'skipped',transaction_id,

@@ -1,6 +1,6 @@
 """Read-only occurrence expansion shared by planning and exports."""
 from datetime import date, timedelta
-from .recurring import parse_date, next_scheduled_date, adjust_working_day
+from .recurring import parse_date, next_scheduled_date, adjust_working_day, effective_end_date
 from .budgets import period_bounds
 
 
@@ -20,6 +20,7 @@ def upcoming(conn, start, end, account_ids=None):
         LEFT JOIN categories p ON p.id=c.parent_id WHERE r.deleted_at IS NULL''').fetchall()
     for rule in rules:
         r=dict(rule)
+        r['end_date']=effective_end_date(conn,rule)
         if account_ids and r['account_id'] not in account_ids and r['to_account_id'] not in account_ids: continue
         occurrences={o['scheduled_date']:dict(o) for o in conn.execute('SELECT * FROM recurring_occurrences WHERE rule_id=?',(r['id'],))}
         def append(nominal, due, status):
