@@ -1,4 +1,4 @@
-{% extends 'base.html' %}{% block content %}<p><a class="button secondary" href="{{url_for('recurring_report.report')}}">Recurring Transactions Report</a></p>
+{% extends 'base.html' %}{% block content %}<p><a href="{{url_for('health.classify',table='recurring_rules')}}">Review financial classifications</a></p><p><a class="button secondary" href="{{url_for('recurring_report.report')}}">Recurring Transactions Report</a></p>
 <div class="title-row"><h1>Recurring Transactions</h1><form method="post" action="{{url_for('recurring.process')}}"><input type="hidden" name="_csrf" value="{{csrf_token}}"><button class="secondary">Check due now</button></form></div>
 <details class="disclosure"><summary>+ Add recurring transaction</summary><div class="disclosure-body compact-form"><form method="post"><input type="hidden" name="_csrf" value="{{csrf_token}}">
 <label>Description<input name="description" required></label><label>Type<select name="transaction_type" id="recurringType"><option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option></select></label>

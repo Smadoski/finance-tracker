@@ -1,11 +1,12 @@
 """Allowlisted calculated financial export; no raw settings, users or application internals."""
 from datetime import date, datetime, timezone
 from .accounts import account_balance
+from .health import financial_health
 from .money import convert
 from .budgets import period_bounds
 from .target_projection import projected_targets
 from .recurring import month_shift
-from .forecasting import forecast
+from .forecasting import forecast, estimated_forecast
 from .upcoming import upcoming, window_end
 from .search import search_transactions
 
@@ -30,7 +31,7 @@ def financial_review(conn, period, reference, currency, fx, version, account_ids
     for a in conn.execute('SELECT * FROM accounts WHERE active=1 ORDER BY name'):
         if account_ids and a['id'] not in account_ids: continue
         balance=account_balance(conn,a)
-        accounts.append(dict(name=a['name'],type=a['account_type'],currency=a['currency'],current_balance=balance,equivalent_balance=convert(balance,a['currency'],currency,fx)))
+        accounts.append(dict(name=a['name'],type=a['account_type'],asset_class=a['asset_class'],currency=a['currency'],current_balance=balance,equivalent_balance=convert(balance,a['currency'],currency,fx)))
     totals=period_totals(conn,start,min(end,today),currency,fx,account_ids)
     targets=projected_targets(conn,period,reference,currency,fx,account_ids,today)
     # Explicit allowlist removes target/category primary keys as well as implementation flags.
@@ -61,7 +62,33 @@ def financial_review(conn, period, reference, currency, fx, version, account_ids
         trend['categories']={c:last['expense']['by_category'].get(c,0)-first['expense']['by_category'].get(c,0) for c in averages}
     previous_start=month_shift(today.replace(day=1),-1,1)
     elapsed_end=previous_start.replace(day=min(today.day,period_bounds('monthly',previous_start)[1].day))
-    return dict(metadata=dict(version=version,exported_at=datetime.now(timezone.utc).isoformat(),period=period,start=str(start),end=str(end),as_of=str(today),equivalent_currency=currency,account_currencies=sorted({a['currency'] for a in accounts}),gbp_eur_rate=fx),
+    health=financial_health(conn,currency,fx,today,account_ids)
+    for account in health['accounts']: account.pop('id',None)
+    classifications=[]
+    for raw in conn.execute('''SELECT t.tx_date,t.description,t.amount,t.expense_type,t.income_type,t.spending_class,
+        a.name account,a.currency,a.id account_id,c.name category,f.name funding_source,s.purpose funding_strategy
+        FROM transactions t JOIN accounts a ON a.id=t.account_id LEFT JOIN categories c ON c.id=t.category_id
+        LEFT JOIN funding_sources f ON f.id=t.funding_source_id LEFT JOIN funding_strategies s ON s.id=t.funding_strategy_id
+        WHERE t.tx_date>=? AND t.tx_date<=? AND COALESCE(t.transfer_group,'')='' ORDER BY t.tx_date,t.id''',(str(start),str(min(end,today)))):
+        row=dict(raw)
+        if account_ids and row['account_id'] not in account_ids: continue
+        row.pop('account_id'); classifications.append(row)
+    classified_recurring=[]
+    for raw in conn.execute('''SELECT r.description,r.transaction_type,r.amount,r.frequency,r.start_date,r.end_date,r.active,
+        r.expense_type,r.income_type,r.spending_class,a.name account,a.currency,a.id account_id,
+        c.name category,f.name funding_source,s.purpose funding_strategy,s.end_date funding_end_date
+        FROM recurring_rules r JOIN accounts a ON a.id=r.account_id LEFT JOIN categories c ON c.id=r.category_id
+        LEFT JOIN funding_sources f ON f.id=r.funding_source_id LEFT JOIN funding_strategies s ON s.id=r.funding_strategy_id
+        WHERE r.deleted_at IS NULL ORDER BY r.id'''):
+        row=dict(raw)
+        if account_ids and row['account_id'] not in account_ids: continue
+        row.pop('account_id'); classified_recurring.append(row)
+    estimates={h:estimated_forecast(conn,today,window_end(h,today),currency,fx,account_ids,health) for h in ('month',*horizons)}
+    for projection in estimates.values():
+        for account in projection['accounts']:
+            account.pop('account_id')
+            account['transactions']=[{k:r[k] for k in ('due_date','description','type','effect','status')} for r in account['transactions']]
+    return dict(schema_version='finance-tracker.financial-review/2.9',financial_health=health,classified_transactions=classifications,classified_recurring=classified_recurring,estimated_forecast=estimates,metadata=dict(version=version,exported_at=datetime.now(timezone.utc).isoformat(),period=period,start=str(start),end=str(end),as_of=str(today),equivalent_currency=currency,account_currencies=sorted({a['currency'] for a in accounts}),gbp_eur_rate=fx),
         accounts=accounts,period_income=totals['income'],period_expenditure=totals['expense'],targets=target_data,recurring=future_data,forecast=projections,
         historical_context=dict(months_requested=history,months_with_activity=len(observed),periods=history_rows,average_category_spend=averages,trend=trend,
             current_month_to_date=period_totals(conn,today.replace(day=1),today,currency,fx,account_ids),

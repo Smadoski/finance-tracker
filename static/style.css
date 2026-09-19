@@ -52,3 +52,9 @@ header .brand-logo{display:block;position:relative;overflow:hidden;width:218px;h
 header .brand-logo img{position:absolute;width:256px;height:auto;max-width:none;left:-22px;top:-59px}
 @media(max-width:900px){header .brand-logo{width:191px;height:42px}header .brand-logo img{width:224px;left:-19px;top:-51.5px}}
 @media(max-width:600px){header .brand-logo{width:145px;height:32px}header .brand-logo img{width:170.5px;left:-15px;top:-39px}}
+
+/* Financial Health keeps headline figures compact on phones; detail panels are collapsible. */
+.health-metrics { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.health-metrics .metric { min-width: 0; overflow-wrap: anywhere; }
+.health-metrics .metric b { font-size: 1.15rem; }
+.funding-step { margin-top: 12px; }

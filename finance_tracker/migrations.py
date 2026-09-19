@@ -114,3 +114,51 @@ def migrate_v280(conn):
         conn.rollback()
         raise
     finally: conn.execute(f'PRAGMA foreign_keys={foreign_keys}')
+
+
+def migrate_v290(conn):
+    """Atomic additive migration: existing classifications remain explicitly unknown."""
+    from .classifications import ASSET_CLASSES, EXPENSE_TYPES, INCOME_TYPES, SPENDING_CLASSES, TABLES
+    conn.commit()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        statements = [
+            '''CREATE TABLE IF NOT EXISTS funding_sources (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)''',
+            '''CREATE TABLE IF NOT EXISTS funding_strategies (
+                id INTEGER PRIMARY KEY, purpose TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'other' CHECK(kind IN ('housing','other')),
+                currency TEXT NOT NULL, monthly_amount REAL NOT NULL CHECK(monthly_amount>0),
+                start_date TEXT, end_date TEXT, change_event TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1)''',
+            '''CREATE TABLE IF NOT EXISTS funding_steps (
+                strategy_id INTEGER NOT NULL REFERENCES funding_strategies(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL, account_id INTEGER NOT NULL REFERENCES accounts(id),
+                allocation REAL CHECK(allocation>=0), monthly_gross REAL CHECK(monthly_gross>=0), monthly_net REAL CHECK(monthly_net>=0),
+                PRIMARY KEY(strategy_id,position), UNIQUE(strategy_id,account_id))''',
+            '''CREATE TABLE IF NOT EXISTS pension_withdrawals (
+                id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id),
+                withdrawal_date TEXT NOT NULL, gross REAL NOT NULL CHECK(gross>0), net REAL CHECK(net>=0), notes TEXT NOT NULL DEFAULT '')''',
+            '''CREATE TABLE IF NOT EXISTS capital_movements (
+                id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id),
+                movement_date TEXT NOT NULL, amount REAL NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('opening','movement')), notes TEXT NOT NULL DEFAULT '')''',
+        ]
+        for statement in statements: conn.execute(statement)
+        if not conn.execute('SELECT 1 FROM funding_sources LIMIT 1').fetchone():
+            for name in ('Current income','Designated capital','General capital','Pension drawdown','Extraordinary income','Other'):
+                conn.execute('INSERT INTO funding_sources(name) VALUES(?)',(name,))
+        def add(table, name, definition):
+            if name not in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
+        def choice(values):
+            return "TEXT NOT NULL DEFAULT 'unclassified' CHECK({field} IN ("+','.join("'"+v+"'" for v in values)+'))'
+        add('accounts','asset_class',choice(ASSET_CLASSES).format(field='asset_class'))
+        for table in TABLES:
+            for field, values in [('expense_type',EXPENSE_TYPES),('income_type',INCOME_TYPES),('spending_class',SPENDING_CLASSES)]:
+                add(table,field,choice(values).format(field=field))
+            add(table,'funding_source_id','INTEGER REFERENCES funding_sources(id)')
+            add(table,'funding_strategy_id','INTEGER REFERENCES funding_strategies(id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_health_history ON transactions(tx_date,account_id,expense_type,income_type)')
+        conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('schema_version','2.9.0')")
+        if conn.execute('PRAGMA foreign_key_check').fetchone(): raise ValueError('Foreign key check failed during v2.9 migration.')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise

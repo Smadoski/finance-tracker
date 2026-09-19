@@ -1,6 +1,8 @@
-# Household Finance Tracker v2.8.0
+# Household Finance Tracker v2.9.0
 
 A private, self-hosted finance tracker designed for a Mac mini and shared household use.
+
+See [v2.9.0 release and migration notes](UPDATE-v2.9.0.md) for Financial Health, editable classifications, funding strategies, retirement monitoring, estimated forecasts and the JSON export navigation fix.
 
 See [v2.8.0 release and migration notes](UPDATE-v2.8.0.md) for recurring reports, additional frequencies, transaction deletion and PDF handling. All [v2.7.0 planning features](UPDATE-v2.7.0.md) are retained.
 
