@@ -2,10 +2,13 @@
 
 The release record is GitHub source, tags and downloadable assets together. Building an installer locally is not a published release.
 
+Before starting, read [DEVELOPMENT.md](DEVELOPMENT.md), [ROADMAP.md](ROADMAP.md)
+and [CHANGELOG.md](CHANGELOG.md). Keep scope and validation status in those files.
+
 1. Inspect current GitHub main, tags and Releases, plus the latest installed/released version. Resolve discrepancies before selecting a baseline. Never reuse a released version number for different source.
 2. Develop on a `codex/` feature/release branch based on the latest released source. Preserve all existing features unless their removal is explicitly approved.
 3. Run the complete tests and migration checks on isolated copies. Record counts, browser checks, upgrade rehearsal and any unperformed live/device checks in the versioned test report.
-4. Update VERSION, current README/release manifest and release/migration notes. Installer metadata reads VERSION. Historical release documents keep their original versions.
+4. Update VERSION, current README/release manifest and release/migration notes. Move delivered Unreleased entries into the versioned CHANGELOG section; reconcile ROADMAP and DEVELOPMENT with the released scope and verification evidence. Installer metadata reads VERSION. Historical release documents keep their original versions.
 5. Commit source and documentation; build with the existing Finder-compatible installer builder. Inspect the expanded package against committed source and verify private data, secrets, caches and old build artifacts are excluded. Generate SHA-256 asset checksums.
 6. Push the release branch and open a pull request. Verify its head commit and checks. Merge to main only when release/promotion is authorised; do not rewrite shared history or bypass required reviews.
 7. Create the version tag on the exact released commit. Publish a GitHub Release containing the matching macOS installer, source ZIP, release/test notes and checksums.

@@ -11,6 +11,16 @@ def forecast(conn, start, end, currency, fx, account_ids=None):
               if a['account_type'] in CASH_TYPES and (not account_ids or a['id'] in account_ids)]
     items=upcoming(conn,start,end,account_ids)
     result=[]
+    cards=[]
+    card_accounts=[dict(a) for a in conn.execute("SELECT * FROM accounts WHERE active=1 AND account_type='credit_card' ORDER BY name") if not account_ids or a['id'] in account_ids]
+    for card in card_accounts:
+        balance=account_balance(conn,card); changes=[]
+        for item in items:
+            effect=0.0
+            if item['account_id']==card['id']: effect=float(item['amount'])*(1 if item['type'] in ('expense','transfer') else -1)
+            if item['type']=='transfer' and item['to_account_id']==card['id']: effect-=float(item['to_amount'])
+            if effect: changes.append(dict(item,effect=effect))
+        cards.append(dict(account_id=card['id'],account=card['name'],currency=card['currency'],current=balance,projected=balance+sum(x['effect'] for x in changes),transactions=changes))
     for account in accounts:
         balance=account_balance(conn,account); income=expense=transfers=0.0; contributors=[]
         for item in items:
@@ -26,7 +36,7 @@ def forecast(conn, start, end, currency, fx, account_ids=None):
         result.append(dict(account_id=account['id'],account=account['name'],currency=account['currency'],current=balance,
             income=income,expense=expense,transfers=transfers,projected=balance+income-expense+transfers,transactions=contributors))
     combined={key:sum(convert(a[key],a['currency'],currency,fx) for a in result) for key in ('current','income','expense','transfers','projected')}
-    return dict(start=str(start),end=str(end),currency=currency,accounts=result,**combined,
+    return dict(start=str(start),end=str(end),currency=currency,accounts=result,cards=cards,**combined,
         method='Current posted balance plus unposted scheduled income, minus scheduled expenses, plus net scheduled transfers. Pending review items are assumed to post on their due date. No unscheduled spending or exchange-rate changes are predicted.')
 
 
@@ -42,6 +52,10 @@ def estimated_forecast(conn, start, end, currency, fx, account_ids=None, health=
         account['projected']-=account['estimated_additional']
     result['estimated_additional']=sum(convert(a['estimated_additional'],a['currency'],currency,fx) for a in result['accounts'])
     result['projected']-=result['estimated_additional']
+    for card in result['cards']:
+        extra=health['estimated_additional_monthly_by_account'].get(str(card['account_id']),0)*days/(365.25/12)
+        card['estimated_additional']=convert(extra,currency,card['currency'],fx)
+        card['projected']+=card['estimated_additional']
     result['history']=health['history']
     result['method']='Known scheduled cash flows plus estimated unscheduled normal expenditure. Capital purchases are never extrapolated; known scheduled capital purchases remain scheduled cash flows. Extraordinary receipts are never extrapolated. Historical residuals are prorated by days / (365.25/12). '+health['history']['method']
     return result

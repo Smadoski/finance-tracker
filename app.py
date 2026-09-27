@@ -8,6 +8,7 @@ from finance_tracker.settings import security_summary as build_security_summary
 from finance_tracker.receipts import save_receipt as receipt_save, delete_if_unreferenced
 from finance_tracker.accounts import account_balance as service_account_balance
 from finance_tracker.migrations import migrate_v250, migrate_v270, migrate_v280, migrate_v290
+from finance_tracker.accounts import validate_account_change
 from finance_tracker.recurring import process_due_path, start_scheduler, resolve_pending_occurrence
 from finance_tracker.recurring_routes import create_blueprint as create_recurring_blueprint
 from finance_tracker.budget_routes import create_blueprint as create_budget_blueprint
@@ -695,6 +696,7 @@ def logout():
     session.clear()
     return redirect(url_for('login') if authentication_enabled() else url_for('dashboard'))
 
+@app.route('/reports/overview',endpoint='reports_overview')
 @app.route('/')
 @login_required
 def dashboard():
@@ -705,13 +707,13 @@ def dashboard():
     liquid_types={'current','savings','premium_bonds','cash'}
     for a in accounts:
         bal=account_balance(conn,a); gbp,eur=dual_values(bal,a['currency'],fx)
-        sign=-1 if a['account_type']=='liability' else 1
+        sign=-1 if a['account_type'] in ('liability','credit_card') else 1
         totals['gbp'] += sign*gbp; totals['eur'] += sign*eur
         if a['account_type'] in liquid_types:
             liquid['gbp'] += gbp; liquid['eur'] += eur
         elif a['account_type']=='pension':
             pensions['gbp'] += gbp; pensions['eur'] += eur
-        elif a['account_type']=='liability':
+        elif a['account_type'] in ('liability','credit_card'):
             liabilities['gbp'] += gbp; liabilities['eur'] += eur
         else:
             # Anything not liquid/pension/liability (e.g. 'other_asset') still
@@ -727,10 +729,15 @@ def dashboard():
     for setting_key in ('dashboard_account_1_id','dashboard_account_2_id'):
         selected_id=get_setting(setting_key,'')
         match=next((x for x in rows if str(x['id'])==str(selected_id)),None) if selected_id else None
-        if match: selected_native.append(match)
-    planning=dashboard_summary(conn,get_setting('base_currency','GBP'),fx)
+        if match and match not in selected_native: selected_native.append(match)
+    planning=dashboard_summary(conn,get_setting('base_currency','GBP'),fx) if request.path=='/reports/overview' else None
+    from finance_tracker.upcoming import upcoming
+    from datetime import timedelta
+    attention=dict(pending=conn.execute('SELECT COUNT(*) FROM pending_transactions').fetchone()[0],uncategorised=conn.execute("SELECT COUNT(*) FROM transactions WHERE category_id IS NULL AND COALESCE(transfer_group,'')=''").fetchone()[0])
+    due=upcoming(conn,date.today(),date.today()+timedelta(days=6))
+    cash={cur:sum(a['value_'+cur] for a in rows if a['account_type'] in ('current','savings','cash')) for cur in ('gbp','eur')}
     conn.close()
-    return render_template('dashboard.html',planning=planning,accounts=rows,total=totals,liquid=liquid,pensions=pensions,liabilities=liabilities,other_assets=other_assets,fx=fx,recent=recent,selected_native=selected_native)
+    return render_template('overview.html' if request.path=='/reports/overview' else 'dashboard.html',attention=attention,due=due,cash=cash,planning=planning,accounts=rows,total=totals,liquid=liquid,pensions=pensions,liabilities=liabilities,other_assets=other_assets,fx=fx,recent=recent,selected_native=selected_native)
 
 @app.route('/accounts', methods=['GET','POST'])
 @login_required
@@ -739,6 +746,7 @@ def accounts():
     if request.method=='POST':
         try:
             opening_balance=float(request.form.get('opening_balance') or 0)
+            opening_balance=validate_account_change(conn,None,request.form['account_type'],request.form['currency'],opening_balance)
         except ValueError:
             opening_balance=None
         if opening_balance is None:
@@ -781,8 +789,15 @@ def edit_account(account_id):
             conn.close(); flash('Choose a valid currency for the account.','error'); return redirect(url_for('edit_account',account_id=account_id))
         try:
             opening_balance=float(request.form.get('opening_balance') or 0)
+            opening_balance=validate_account_change(conn,None,request.form['account_type'],request.form['currency'],opening_balance)
         except ValueError:
             opening_balance=float(a['opening_balance']); flash('Opening balance was not changed because the value was invalid.','error')
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            a=conn.execute('SELECT * FROM accounts WHERE id=?',(account_id,)).fetchone()
+            opening_balance=validate_account_change(conn,a,account_type,currency,opening_balance,request.form.get('confirm_card_conversion')=='1')
+        except ValueError as exc:
+            conn.close(); flash(str(exc),'error'); return redirect(url_for('edit_account',account_id=account_id))
         try:
             conn.execute('''UPDATE accounts SET name=?,account_type=?,currency=?,opening_balance=?,institution=?,notes=?,active=? WHERE id=?''',(
                 name,account_type,currency,opening_balance,request.form.get('institution','').strip(),request.form.get('notes','').strip(),1 if request.form.get('active')=='1' else 0,account_id))
@@ -817,7 +832,7 @@ def transactions():
             category=conn.execute('SELECT kind FROM categories WHERE id=?',(category_id,)).fetchone()
             if category:
                 if category['kind']=='expense':
-                    amount=-abs(amount)
+                    amount=abs(amount) if request.form.get('refund')=='1' else -abs(amount)
                 elif category['kind']=='income':
                     amount=abs(amount)
         conn.execute('''INSERT INTO transactions(account_id,tx_date,description,amount,category_id,tag_text,notes,created_by)
@@ -837,7 +852,7 @@ def transactions():
 def recategorise_transaction(txid):
     new_id=int(request.form['category_id']) if request.form.get('category_id') else None
     conn=db()
-    existing=conn.execute('SELECT transfer_group,amount FROM transactions WHERE id=?',(txid,)).fetchone()
+    existing=conn.execute('SELECT transfer_group,amount,category_id FROM transactions WHERE id=?',(txid,)).fetchone()
     if not existing: conn.close(); abort(404)
     if existing['transfer_group']:
         conn.close(); flash('Linked transfer entries cannot be recategorised individually.','error'); return redirect(request.referrer or url_for('transactions'))
@@ -845,7 +860,9 @@ def recategorise_transaction(txid):
     if new_id is not None:
         cat=conn.execute('SELECT id,kind FROM categories WHERE id=?',(new_id,)).fetchone()
         if not cat: conn.close(); abort(400)
-        if cat['kind']=='expense': amount=-abs(amount)
+        if cat['kind']=='expense':
+            previous=conn.execute('SELECT kind FROM categories WHERE id=?',(existing['category_id'],)).fetchone()
+            amount=abs(amount) if amount>0 and previous and previous['kind']=='expense' else -abs(amount)
         elif cat['kind']=='income': amount=abs(amount)
     conn.execute('UPDATE transactions SET category_id=?,amount=? WHERE id=?',(new_id,amount,txid))
     conn.commit(); conn.close(); flash('Transaction category updated.','ok')
@@ -865,7 +882,7 @@ def edit_transaction(txid):
         if category_id:
             cat=conn.execute('SELECT kind FROM categories WHERE id=?',(category_id,)).fetchone()
             if not cat: conn.close(); abort(400)
-            if cat['kind']=='expense': amount=-amount
+            if cat['kind']=='expense': amount=amount if request.form.get('refund')=='1' else -amount
             elif cat['kind']=='income': amount=amount
             else: amount=-amount if float(t['amount'])<0 else amount
         else:
@@ -896,7 +913,8 @@ def edit_transaction(txid):
         if old_receipt and old_receipt!=new_receipt:
             delete_if_unreferenced(conn,RECEIPT_DIR,old_receipt)
         conn.close(); flash('Transaction updated.','ok'); return redirect(url_for('transactions'))
-    categories=category_options(conn); conn.close(); return render_template('transaction_edit.html',t=t,categories=categories)
+    categories=category_options(conn); kind=conn.execute('SELECT kind FROM categories WHERE id=?',(t['category_id'],)).fetchone()
+    conn.close(); return render_template('transaction_edit.html',t=t,categories=categories,is_refund=bool(kind and kind['kind']=='expense' and t['amount']>0))
 
 
 @app.route('/transactions/reclassify', methods=['POST'])
@@ -914,13 +932,13 @@ def reclassify_transactions():
     for row in rows:
         if row['transfer_group']: continue
         amount=float(row['amount'])
-        if new_cat['kind']=='expense': amount=-abs(amount)
+        if new_cat['kind']=='expense': amount=abs(amount) if amount>0 and old_cat['kind']=='expense' else -abs(amount)
         elif new_cat['kind']=='income': amount=abs(amount)
         conn.execute('UPDATE transactions SET category_id=?,amount=? WHERE id=?',(new_id,amount,row['id'])); count+=1
     pending=conn.execute('SELECT id,amount FROM pending_transactions WHERE category_id=?',(old_id,)).fetchall()
     for row in pending:
         amount=float(row['amount']); entry_type='expense' if amount<0 else 'income'
-        if new_cat['kind']=='expense': amount=-abs(amount); entry_type='expense'
+        if new_cat['kind']=='expense': amount=abs(amount) if amount>0 and old_cat['kind']=='expense' else -abs(amount); entry_type='expense'
         elif new_cat['kind']=='income': amount=abs(amount); entry_type='income'
         conn.execute('UPDATE pending_transactions SET category_id=?,amount=?,entry_type=? WHERE id=?',(new_id,amount,entry_type,row['id']))
     conn.commit(); conn.close()
@@ -958,7 +976,7 @@ def transfer():
             flash('Enter valid transfer accounts and amounts.','error')
         fa=conn.execute('SELECT * FROM accounts WHERE id=?',(from_id,)).fetchone() if from_id else None
         ta=conn.execute('SELECT * FROM accounts WHERE id=?',(to_id,)).fetchone() if to_id else None
-        if not fa or not ta or from_id==to_id:
+        if not fa or not ta or from_id==to_id or not fa['active'] or not ta['active'] or fa['account_type'] in ('pension','other_asset','liability') or ta['account_type'] in ('pension','other_asset','liability'):
             flash('Choose two different valid accounts.','error')
         elif out_amt<=0 or in_amt<=0:
             flash('Transfer amounts must be greater than zero.','error')
@@ -1218,7 +1236,7 @@ def quick_entry():
     categories=category_options(conn,('expense','income','other'))
     quick_id=get_setting('quick_account_id','')
     if not quick_id and accounts: quick_id=str(accounts[0]['id'])
-    values={'tx_date':date.today().isoformat(),'description':'','amount':'','category_id':'','entry_type':'expense','notes':'','receipt_path':'','ocr_text':''}
+    values={'tx_date':date.today().isoformat(),'description':'','amount':'','category_id':'','entry_type':'expense','refund':'','notes':'','receipt_path':'','ocr_text':''}
     if request.method=='POST':
         action=request.form.get('action','save')
         values={k:request.form.get(k,'') for k in values}
@@ -1255,7 +1273,7 @@ def quick_entry():
                 if category_id:
                     cat=conn.execute('SELECT kind FROM categories WHERE id=?',(category_id,)).fetchone()
                     if cat and cat['kind'] in ('expense','income'): entry_type=cat['kind']
-                amount=-amount if entry_type=='expense' else amount
+                amount=-amount if entry_type=='expense' and request.form.get('refund')!='1' else amount
                 conn.execute('''INSERT INTO pending_transactions(account_id,tx_date,description,amount,category_id,entry_type,notes,receipt_path,ocr_text,created_by)
                                 VALUES (?,?,?,?,?,?,?,?,?,?)''',(account_id,safe_date(values['tx_date'],date.today().isoformat()),description,amount,category_id,entry_type,values['notes'].strip(),values.get('receipt_path') or None,values.get('ocr_text') or None,user['id']))
                 conn.commit(); session.pop('quick_receipt_path',None); flash('Quick entry saved as pending.','ok'); conn.close(); return redirect(url_for('quick_entry'))
@@ -1280,6 +1298,8 @@ def pending_entries():
 def post_pending(pid):
     conn=db(); user=current_user(); p=conn.execute('SELECT * FROM pending_transactions WHERE id=?',(pid,)).fetchone()
     if not p: conn.close(); abort(404)
+    if not conn.execute("SELECT 1 FROM accounts WHERE id=? AND active=1 AND account_type NOT IN ('pension','other_asset','liability')",(p['account_id'],)).fetchone():
+        conn.close(); flash('Choose an active transaction account before posting.','error'); return redirect(url_for('pending_entries'))
     try:
         category_id=int(request.form['category_id']) if request.form.get('category_id') else None
         amount=abs(float(request.form['amount']))
@@ -1292,7 +1312,7 @@ def post_pending(pid):
     if category_id:
         cat=conn.execute('SELECT kind FROM categories WHERE id=?',(category_id,)).fetchone()
         if cat and cat['kind'] in ('expense','income'): entry_type=cat['kind']
-    amount=-amount if entry_type=='expense' else amount
+    amount=-amount if entry_type=='expense' and request.form.get('refund')!='1' else amount
     conn.execute('''INSERT INTO transactions(account_id,tx_date,description,amount,category_id,tag_text,notes,receipt_path,created_by)
                     VALUES (?,?,?,?,?,?,?,?,?)''',(p['account_id'],safe_date(request.form.get('tx_date'),p['tx_date']),request.form.get('description','').strip() or p['description'],amount,category_id,'Quick Entry',request.form.get('notes','').strip(),p['receipt_path'],user['id']))
     transaction_id=conn.execute('SELECT last_insert_rowid()').fetchone()[0]
@@ -1394,7 +1414,7 @@ def account_pdf(account_id):
 def networth_pdf():
     conn=db(); accounts=conn.execute('SELECT * FROM accounts WHERE active=1 ORDER BY account_type,name').fetchall(); fx=latest_fx(conn); base=get_setting('base_currency','GBP'); data=[['Account','Type',f'Value ({base})']]; total=0
     for a in accounts:
-        bal=account_balance(conn,a); b=convert(bal,a['currency'],base,fx); signed=-b if a['account_type']=='liability' else b; total += signed
+        bal=account_balance(conn,a); b=convert(bal,a['currency'],base,fx); signed=-b if a['account_type'] in ('liability','credit_card') else b; total += signed
         data.append([a['name'],a['account_type'].replace('_',' ').title(),f'{signed:,.2f}'])
     data.append(['','Net Worth',f'{total:,.2f}'])
     conn.close(); buf=io.BytesIO(); doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=15*mm,leftMargin=15*mm,topMargin=15*mm,bottomMargin=15*mm); styles=getSampleStyleSheet(); story=[Paragraph(get_setting('household_name','Household Finance'),styles['Title']),Paragraph(f'Net Worth Statement — {date.today().isoformat()}',styles['Heading2']),Paragraph(f'GBP/EUR rate used: {fx:.4f}',styles['Normal']),Spacer(1,6*mm)]

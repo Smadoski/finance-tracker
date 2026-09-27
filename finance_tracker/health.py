@@ -67,19 +67,19 @@ def financial_health(conn, currency, fx, today=None, account_ids=None):
     accounts=[]; totals=defaultdict(float); buckets=defaultdict(float)
     for raw in conn.execute('SELECT * FROM accounts WHERE active=1 ORDER BY name'):
         if account_ids and raw['id'] not in account_ids: continue
-        a=dict(raw); balance=account_balance(conn,a); signed=-abs(balance) if a['account_type']=='liability' else balance
+        a=dict(raw); balance=account_balance(conn,a); signed=-balance if a['account_type'] in ('liability','credit_card') else balance
         amount=converted(signed,a['currency'],currency,fx)
         accounts.append(dict(id=a['id'],name=a['name'],account_type=a['account_type'],asset_class=a['asset_class'],currency=a['currency'],balance=balance,equivalent_balance=amount))
         totals['net_worth']+=amount
-        totals['liabilities' if a['account_type']=='liability' else a['asset_class']]+=abs(amount) if a['account_type']=='liability' else amount
-        if a['account_type']!='liability' and a['asset_class'] in ('accessible','designated','retirement'):
+        totals['liabilities' if a['account_type'] in ('liability','credit_card') else a['asset_class']]+=-amount if a['account_type'] in ('liability','credit_card') else amount
+        if a['account_type'] not in ('liability','credit_card') and a['asset_class'] in ('accessible','designated','retirement'):
             buckets[a['currency']]+=balance
     ids={a['id'] for a in accounts}; by_id={a['id']:a for a in accounts}
     # A single SQL aggregation serves dashboard, estimates and all client-side scenarios.
     history=[dict(r) for r in conn.execute('''SELECT t.account_id,t.category_id,t.expense_type,t.income_type,t.spending_class,
-        substr(t.tx_date,1,7) month,SUM(CASE WHEN t.amount<0 THEN -t.amount ELSE 0 END) expense,
-        SUM(CASE WHEN t.amount>0 THEN t.amount ELSE 0 END) income,COUNT(*) records
-        FROM transactions t WHERE t.tx_date>=? AND t.tx_date<? AND COALESCE(t.transfer_group,'')=''
+        substr(t.tx_date,1,7) month,SUM(CASE WHEN c.kind='expense' OR t.amount<0 THEN -t.amount ELSE 0 END) expense,
+        SUM(CASE WHEN t.amount>0 AND COALESCE(c.kind,'')!='expense' THEN t.amount ELSE 0 END) income,COUNT(*) records
+        FROM transactions t LEFT JOIN categories c ON c.id=t.category_id WHERE t.tx_date>=? AND t.tx_date<? AND COALESCE(t.transfer_group,'')=''
         GROUP BY t.account_id,t.category_id,t.expense_type,t.income_type,t.spending_class,substr(t.tx_date,1,7)''',(str(start),str(end))) if r['account_id'] in ids]
     months=len({r['month'] for r in history}); denominator=max(months,1)
     maturity='mature annual view' if months>=12 else 'established' if months>=6 else 'preliminary' if months>=3 else 'limited history'
@@ -132,13 +132,13 @@ def financial_health(conn, currency, fx, today=None, account_ids=None):
     movements=sum(converted(r['amount'],by_id[r['account_id']]['currency'],currency,fx) for r in capital_rows if r['kind']=='movement' and capital_start and r['movement_date']>=capital_start)
     capex=extra=0
     if capital_start:
-        for row in conn.execute('''SELECT account_id,SUM(CASE WHEN amount<0 AND expense_type='capital' THEN -amount ELSE 0 END) capex,
-            SUM(CASE WHEN amount>0 AND income_type='extraordinary' THEN amount ELSE 0 END) extra FROM transactions
-            WHERE tx_date>=? AND tx_date<=? AND COALESCE(transfer_group,'')='' GROUP BY account_id''',(capital_start,str(today))):
+        for row in conn.execute('''SELECT t.account_id,SUM(CASE WHEN (t.amount<0 OR c.kind='expense') AND t.expense_type='capital' THEN -t.amount ELSE 0 END) capex,
+            SUM(CASE WHEN t.amount>0 AND COALESCE(c.kind,'')!='expense' AND t.income_type='extraordinary' THEN t.amount ELSE 0 END) extra FROM transactions t LEFT JOIN categories c ON c.id=t.category_id
+            WHERE t.tx_date>=? AND t.tx_date<=? AND COALESCE(t.transfer_group,'')='' GROUP BY t.account_id''',(capital_start,str(today))):
             if row['account_id'] in ids:
                 cur=by_id[row['account_id']]['currency']; capex+=converted(row['capex'],cur,currency,fx); extra+=converted(row['extra'],cur,currency,fx)
     funding=funding_projection(conn,accounts,fx,today)
-    retirement_ready=months>=3 and unknown==0 and unknown_rules==0 and all(a['asset_class']!='unclassified' for a in accounts if a['account_type']!='liability')
+    retirement_ready=months>=3 and unknown==0 and unknown_rules==0 and all(a['asset_class']!='unclassified' for a in accounts if a['account_type'] not in ('liability','credit_card'))
     return dict(as_of=str(today),currency=currency,accounts=accounts,actual=dict(totals),model=model,operating=current,
         history=dict(start=str(start),end=str(end-timedelta(days=1)),months=months,maturity=maturity,unclassified_records=unknown,unclassified_rules=unknown_rules,
             method='Previous 12 complete calendar months; averages divide by months with recorded activity. Empty months may be missing data. Scheduled normal equivalents plus positive historical residual by account/category avoid double counting. Existing schedules in the history window are deducted from historical category averages, including ended schedules; this conservative estimate may understate variable spending in the same category.'),

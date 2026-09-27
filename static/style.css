@@ -58,3 +58,14 @@ header .brand-logo img{position:absolute;width:256px;height:auto;max-width:none;
 .health-metrics .metric { min-width: 0; overflow-wrap: anywhere; }
 .health-metrics .metric b { font-size: 1.15rem; }
 .funding-step { margin-top: 12px; }
+
+/* Balances-first Home. Native disclosure controls keep secondary detail accessible. */
+.home-balances{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.favourite-account{display:flex;flex-direction:column;gap:10px;text-decoration:none;border-top:4px solid #28736a;color:inherit;min-width:0}
+.favourite-account span{font-weight:600;overflow-wrap:anywhere}.favourite-account strong{font-size:clamp(1.6rem,4vw,2.4rem);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.favourite-account small{color:#536171}.favourite-account:hover,.favourite-account:focus-visible{background:#edf6f3}
+.home-total{font-size:1.5rem;font-weight:650;overflow-wrap:anywhere}.home-total small{font-size:1rem;font-weight:400}
+.home-position{margin-top:16px}.home-attention{border-left:4px solid #ab761b}
+@media(max-width:600px){.home-balances{grid-template-columns:1fr;gap:10px}.favourite-account{padding:16px}.home-position h2{font-size:1.15rem}}
+
+.home-recent-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:14px 0;border-bottom:1px solid #e1e6eb;align-items:center}.home-recent-row:last-child{border-bottom:0}.home-recent-row strong{display:block;overflow-wrap:anywhere}.home-recent-row small{display:block;color:#536171;margin-top:4px}.home-recent-row>span{font-variant-numeric:tabular-nums;white-space:nowrap}
