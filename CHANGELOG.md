@@ -4,15 +4,14 @@ VERSION is the single application/package version marker. This index links to
 existing detailed release and validation records rather than replacing them.
 Publication does not prove installation on a particular device.
 
-## Unreleased — v2.10.0 prepared build
+## 2.10.0 — released 2026-09-30
 
 - Balances-first Home with existing favourites, separate cash/debt, compact recent
   transactions and attention links; retained detailed overview in Reports.
 - Credit-card purchase/refund/repayment ledger, explicit balance-preserving liability
   conversion, card forecasts and consistent net worth/refund reporting.
-- [Release/upgrade notes](UPDATE-v2.10.0.md) · [Validation](FinanceTracker-v2.10.0-TEST-REPORT.md).
-- Established repository-first task instructions, a reconciled roadmap and a
-  current baseline/status record in DEVELOPMENT.md.
+
+## Unreleased — v2.11.0 (not yet started)
 
 ## 2.9.0 — published 2026-09-19
 
