@@ -67,7 +67,7 @@ def preview_import(conn, source, mapping, account_id, date_format='%Y-%m-%d'):
             category_id=None; category=value('category')
             if category:
                 match=conn.execute('SELECT id,kind FROM categories WHERE name=? COLLATE NOCASE',(category,)).fetchone()
-                if not match or match['kind']!=('expense' if amount<0 else 'income'): raise ValueError('Unknown category or category does not match amount sign. Map or ignore this column.')
+                if not match or match['kind'] not in (('expense',) if amount<0 else ('income','expense')): raise ValueError('Unknown category or category does not match amount sign. Map or ignore this column.')
                 category_id=match['id']
             key=(day,round(amount,8),description.casefold())
             row.update(tx_date=day,description=description,amount=amount,currency=account['currency'],category=category,category_id=category_id,account_id=int(account_id),duplicate=key in seen)

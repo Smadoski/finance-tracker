@@ -132,7 +132,7 @@ def create_blueprint(db, login_required, get_setting, latest_fx):
                     for position,raw_id in enumerate(steps):
                         if not raw_id: continue
                         aid=int(raw_id)
-                        if aid in seen or not conn.execute("SELECT id FROM accounts WHERE id=? AND active=1 AND account_type!='liability'",(aid,)).fetchone(): raise ValueError('Funding accounts must be distinct active assets.')
+                        if aid in seen or not conn.execute("SELECT id FROM accounts WHERE id=? AND active=1 AND account_type NOT IN ('liability','credit_card')",(aid,)).fetchone(): raise ValueError('Funding accounts must be distinct active assets.')
                         seen.add(aid); allocation=number(allocations[position] if position<len(allocations) else '',True); gross=number(grosses[position] if position<len(grosses) else '',True); net=number(nets[position] if position<len(nets) else '',True)
                         if any(v is not None and v<0 for v in (allocation,gross,net)) or gross==0 or (net is not None and gross is not None and net>gross): raise ValueError('Funding allocations must be nonnegative; gross must be positive and net no greater than gross.')
                         conn.execute('INSERT INTO funding_steps(strategy_id,position,account_id,allocation,monthly_gross,monthly_net) VALUES(?,?,?,?,?,?)',(strategy_id,position,aid,allocation,gross,net))

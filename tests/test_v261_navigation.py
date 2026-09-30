@@ -3,11 +3,11 @@ from html.parser import HTMLParser
 import pytest
 
 
-DESTINATIONS = [('/', 'Dashboard'), ('/accounts', 'Accounts'),
+DESTINATIONS = [('/', 'Home'), ('/accounts', 'Accounts'),
     ('/transactions', 'Transactions'), ('/quick', 'Quick Entry'),
     ('/pending', 'Pending'), ('/transfer', 'Transfer'),
     ('/categories', 'Categories'), ('/budgets/report', 'Targets'),
-    ('/recurring/', 'Recurring'), ('/reports/categories', 'Reports'),
+    ('/recurring/', 'Recurring'), ('/reports/overview', 'Reports'),
     ('/users', 'Users'), ('/settings', 'Settings'), ('/system', 'Status'),
     ('/valuations', 'Valuations')]
 

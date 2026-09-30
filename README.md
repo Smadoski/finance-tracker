@@ -1,6 +1,13 @@
-# Household Finance Tracker v2.9.0
+# Household Finance Tracker v2.10.0
 
 A private, self-hosted finance tracker designed for a Mac mini and shared household use.
+
+For development, start with [current baseline/status](DEVELOPMENT.md),
+[release history](CHANGELOG.md), [reconciled roadmap](ROADMAP.md) and
+[release workflow](RELEASE-WORKFLOW.md). VERSION is the application/package
+version; published and installed states are recorded separately.
+
+See [v2.10.0 release and upgrade notes](UPDATE-v2.10.0.md) for the balances-first Home page, credit-card transactions, refunds and debt forecasts. This is a prepared build; see DEVELOPMENT.md for publication status.
 
 See [v2.9.0 release and migration notes](UPDATE-v2.9.0.md) for Financial Health, editable classifications, funding strategies, retirement monitoring, estimated forecasts and the JSON export navigation fix.
 

@@ -33,7 +33,7 @@ def category_actual(conn, category_id, start, end, output_currency, fx, account_
                          JOIN categories c ON c.id=t.category_id
                          WHERE (c.id=? OR c.parent_id=?) AND c.kind='expense'
                            AND t.tx_date BETWEEN ? AND ? {account_sql}""",params).fetchall()
-    return sum(abs(convert(row['amount'],row['currency'],output_currency,fx)) for row in rows)
+    return sum(-convert(row['amount'],row['currency'],output_currency,fx) for row in rows)
 
 
 def target_report(conn, period, reference, output_currency, fx, account_ids=None):

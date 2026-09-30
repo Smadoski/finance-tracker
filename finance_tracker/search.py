@@ -10,8 +10,9 @@ def search_transactions(conn, filters, limit=None, offset=0):
     for pending in (False,True):
         if (status=='posted' and pending) or (status=='pending' and not pending): continue
         transfer="NULL" if pending else 't.transfer_group'
-        kind=f"CASE WHEN {transfer} IS NOT NULL OR c.kind='transfer' THEN 'transfer' WHEN t.amount<0 THEN 'expense' ELSE 'income' END"
+        kind=f"CASE WHEN {transfer} IS NOT NULL OR c.kind='transfer' THEN 'transfer' WHEN c.kind='expense' OR t.amount<0 THEN 'expense' ELSE 'income' END"
         where=[]; values=[]
+        if filters.get('uncategorised')=='1': where.append("t.category_id IS NULL AND COALESCE("+transfer+",'')=''")
         if filters.get('q'):
             where.append("t.description LIKE ? ESCAPE '\\'"); values.append('%'+filters['q'].replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%')
         for key,column in (('account_id','t.account_id'),('subcategory_id','t.category_id'),('user_id','t.created_by')):

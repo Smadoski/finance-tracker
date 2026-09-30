@@ -15,7 +15,7 @@ def period_totals(conn, start, end, currency, fx, account_ids=None):
     totals={kind:dict(total=0.0,by_category={},by_subcategory={},by_account={}) for kind in ('income','expense')}
     for row in search_transactions(conn,dict(start=str(start),end=str(end))):
         if row['type']=='transfer' or (account_ids and row['account_id'] not in account_ids): continue
-        amount=abs(convert(row['amount'],row['currency'],currency,fx)); group=totals[row['type']]
+        amount=convert(row['amount'],row['currency'],currency,fx)*(-1 if row['type']=='expense' else 1); group=totals[row['type']]
         group['total']+=amount
         for field,key in (('by_category','category'),('by_subcategory','subcategory'),('by_account','account')):
             label=row[key]
@@ -43,7 +43,7 @@ def financial_review(conn, period, reference, currency, fx, version, account_ids
         totals[kind]['recurring_remaining']=sum(convert(r['amount'],r['currency'],currency,fx) for r in future if r['type']==kind and (not account_ids or r['account_id'] in account_ids))
     projections={h:forecast(conn,today,window_end(h,today),currency,fx,account_ids) for h in ('month',*horizons)}
     for projection in projections.values():
-        for account in projection['accounts']:
+        for account in projection['accounts']+projection['cards']:
             account.pop('account_id')
             account['transactions']=[{k:r[k] for k in ('due_date','description','type','effect','status')} for r in account['transactions']]
     history_rows=[]; month=start.replace(day=1)
@@ -85,7 +85,7 @@ def financial_review(conn, period, reference, currency, fx, version, account_ids
         row.pop('account_id'); classified_recurring.append(row)
     estimates={h:estimated_forecast(conn,today,window_end(h,today),currency,fx,account_ids,health) for h in ('month',*horizons)}
     for projection in estimates.values():
-        for account in projection['accounts']:
+        for account in projection['accounts']+projection['cards']:
             account.pop('account_id')
             account['transactions']=[{k:r[k] for k in ('due_date','description','type','effect','status')} for r in account['transactions']]
     return dict(schema_version='finance-tracker.financial-review/2.9',financial_health=health,classified_transactions=classifications,classified_recurring=classified_recurring,estimated_forecast=estimates,metadata=dict(version=version,exported_at=datetime.now(timezone.utc).isoformat(),period=period,start=str(start),end=str(end),as_of=str(today),equivalent_currency=currency,account_currencies=sorted({a['currency'] for a in accounts}),gbp_eur_rate=fx),
