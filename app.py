@@ -265,6 +265,8 @@ def inject_globals():
 
 @app.before_request
 def access_guard():
+    # The scoped funding endpoint enforces its own read-only setup/network/identity checks.
+    if request.endpoint == 'property_funding.accounts': return None
     if setup_complete() and request.endpoint not in ('static','setup'):
         try: maybe_automatic_backup()
         except Exception as e: set_setting('backup_last_status',f'Backup failed: {e}')
@@ -1420,6 +1422,9 @@ def networth_pdf():
     conn.close(); buf=io.BytesIO(); doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=15*mm,leftMargin=15*mm,topMargin=15*mm,bottomMargin=15*mm); styles=getSampleStyleSheet(); story=[Paragraph(get_setting('household_name','Household Finance'),styles['Title']),Paragraph(f'Net Worth Statement — {date.today().isoformat()}',styles['Heading2']),Paragraph(f'GBP/EUR rate used: {fx:.4f}',styles['Normal']),Spacer(1,6*mm)]
     table=Table(data,colWidths=[80*mm,50*mm,50*mm],repeatRows=1); table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.25,colors.grey),('ALIGN',(-1,1),(-1,-1),'RIGHT'),('FONTSIZE',(0,0),(-1,-1),8),('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold')]))
     story.append(table); doc.build(story); buf.seek(0); return send_file(buf,mimetype='application/pdf',as_attachment=request.args.get('share')!='1',download_name='net_worth_statement.pdf')
+
+from finance_tracker.property_routes import create_blueprint as create_property_blueprint
+app.register_blueprint(create_property_blueprint(lambda: DB_PATH))
 
 from finance_tracker.health_routes import create_blueprint as create_health_blueprint
 app.register_blueprint(create_health_blueprint(db,login_required,get_setting,latest_fx))

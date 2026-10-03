@@ -10,13 +10,14 @@ from .accounts import account_balance
 CONTRACT = 'property-funding-v1'
 
 
-def export_balances(database):
+def export_balances(database, authorize=None):
     path = Path(database).resolve(strict=True)
     conn = sqlite3.connect(path.as_uri()+'?mode=ro', uri=True, timeout=3)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute('PRAGMA query_only=ON')
         conn.execute('BEGIN')
+        if authorize is not None: authorize(conn)
         rows = conn.execute("SELECT * FROM accounts WHERE active=1 AND currency IN ('GBP','EUR') AND account_type NOT IN ('liability','credit_card') ORDER BY id LIMIT 2001").fetchall()
         if len(rows)>2000: raise ValueError('Too many accounts for funding export.')
         accounts=[]
