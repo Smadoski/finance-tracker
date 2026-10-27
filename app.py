@@ -265,8 +265,8 @@ def inject_globals():
 
 @app.before_request
 def access_guard():
-    # The scoped funding endpoint enforces its own read-only setup/network/identity checks.
-    if request.endpoint == 'property_funding.accounts': return None
+    # The scoped funding and business endpoints enforce their own read-only setup/network/identity checks.
+    if request.endpoint in ('property_funding.accounts','business_transactions.transactions','business_transactions.accounts'): return None
     if setup_complete() and request.endpoint not in ('static','setup'):
         try: maybe_automatic_backup()
         except Exception as e: set_setting('backup_last_status',f'Backup failed: {e}')
@@ -1425,6 +1425,9 @@ def networth_pdf():
 
 from finance_tracker.property_routes import create_blueprint as create_property_blueprint
 app.register_blueprint(create_property_blueprint(lambda: DB_PATH))
+
+from finance_tracker.business_routes import create_blueprint as create_business_blueprint
+app.register_blueprint(create_business_blueprint(lambda: DB_PATH))
 
 from finance_tracker.health_routes import create_blueprint as create_health_blueprint
 app.register_blueprint(create_health_blueprint(db,login_required,get_setting,latest_fx))
